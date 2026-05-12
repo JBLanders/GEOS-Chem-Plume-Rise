@@ -251,15 +251,21 @@ CONTAINS
        ENDDO
 
        ! Altitude via hypsometric equation; set Z=0 at surface (L=1)
+!       Zh(1) = 0.0_sp
+!       DO L = 2, NZ
+!          Zh(L) = Zh(L-1)                                                  &
+!                + ( RGASD_CF / GRAV_CF )                                    &
+!                * 0.5_sp * ( REAL(ExtState%TK%Arr%Val(I,J,L-1), sp)        &
+!                           + REAL(ExtState%TK%Arr%Val(I,J,L),   sp) )      &
+!                * LOG( Ph(L-1) / Ph(L) )
+!       ENDDO
+
+       ! Build Alititude using BXH Values
        Zh(1) = 0.0_sp
        DO L = 2, NZ
-          Zh(L) = Zh(L-1)                                                  &
-                + ( RGASD_CF / GRAV_CF )                                    &
-                * 0.5_sp * ( REAL(ExtState%TK%Arr%Val(I,J,L-1), sp)        &
-                           + REAL(ExtState%TK%Arr%Val(I,J,L),   sp) )      &
-                * LOG( Ph(L-1) / Ph(L) )
+          Zh(L) = Zh(L-1) + REAL(HcoState%Grid%BXHEIGHT_M%Val(I,J,L-1), sp)
        ENDDO
-! random comment
+
        ! Find the vertical layer for 800, 700, 500 and 200 hPa to calculate lapse rates later
        ref1 = 1   ! surface
        ref2 = NZ  ! defaults in case threshold not found in column
