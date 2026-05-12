@@ -259,7 +259,7 @@ CONTAINS
                            + REAL(ExtState%TK%Arr%Val(I,J,L),   sp) )      &
                 * LOG( Ph(L-1) / Ph(L) )
        ENDDO
-
+! random comment
        ! Find the vertical layer for 800, 700, 500 and 200 hPa to calculate lapse rates later
        ref1 = 1   ! surface
        ref2 = NZ  ! defaults in case threshold not found in column
