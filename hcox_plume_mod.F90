@@ -276,16 +276,16 @@ CONTAINS
        ref4 = NZ
        ref5 = NZ
 
-       DO L = 1, NZ
+       DO L = 2, NZ
           IF ( Ph(L) <= 85000.0_sp ) THEN; ref2 = L; EXIT; ENDIF
        ENDDO
-       DO L = 1, NZ
+       DO L = 2, NZ
           IF ( Ph(L) <= 70000.0_sp ) THEN; ref3 = L; EXIT; ENDIF
        ENDDO
-       DO L = 1, NZ
+       DO L = 2, NZ
           IF ( Ph(L) <= 50000.0_sp ) THEN; ref4 = L; EXIT; ENDIF
        ENDDO
-       DO L = 1, NZ
+       DO L = 2, NZ
           IF ( Ph(L) <= 20000.0_sp ) THEN; ref5 = L; EXIT; ENDIF
        ENDDO
 
