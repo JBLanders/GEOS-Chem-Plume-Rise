@@ -268,7 +268,6 @@ CONTAINS
           Zh(L) = Zh(L-1) + REAL(HcoState%Grid%BXHEIGHT_M%Val(I,J,L-1), sp)
           save_Zh(I,J,L) = Zh(L)
        ENDDO
-
        ! Find the vertical layer for 800, 700, 500 and 200 hPa to calculate lapse rates later
        ref1 = 1   ! surface
        ref2 = NZ  ! defaults in case threshold not found in column
@@ -279,19 +278,16 @@ CONTAINS
        DO L = 2, NZ
           IF ( Ph(L) <= 85000.0_sp ) THEN; ref2 = L; EXIT; ENDIF
        ENDDO
-       DO L = 2, NZ
+       DO L = 3, NZ
           IF ( Ph(L) <= 70000.0_sp ) THEN; ref3 = L; EXIT; ENDIF
        ENDDO
-       DO L = 2, NZ
+       DO L = 4, NZ
           IF ( Ph(L) <= 50000.0_sp ) THEN; ref4 = L; EXIT; ENDIF
        ENDDO
-       DO L = 2, NZ
+       DO L = 5, NZ
           IF ( Ph(L) <= 20000.0_sp ) THEN; ref5 = L; EXIT; ENDIF
        ENDDO
 
-!       IF (ref1 == ref2) THEN
-!           ref2 = ref2 + 1
-!       ENDIF
        save_ref1(I,J) = ref1
        save_ref2(I,J) = ref2
        save_ref3(I,J) = ref3
@@ -302,20 +298,18 @@ CONTAINS
        ! Le = (T_upper - T_surface) / (Z_upper - Z_surface)
        Le1 = 0.0_sp; Le2 = 0.0_sp; Le3 = 0.0_sp; Le4 = 0.0_sp
 
-       IF ( (Zh(ref2) - Zh(ref1)) /= 0.0_sp ) THEN
-          Le1 = ( REAL(ExtState%TK%Arr%Val(I,J,ref2), sp)           &
-                - REAL(ExtState%TK%Arr%Val(I,J,ref1), sp) )          &
-              / ( Zh(ref2) - Zh(ref1) )   ! surface to 850 hPa
-          Le2 = ( REAL(ExtState%TK%Arr%Val(I,J,ref3), sp)           &
-                - REAL(ExtState%TK%Arr%Val(I,J,ref1), sp) )          &
-              / ( Zh(ref3) - Zh(ref1) )   ! surface to 700 hPa
-          Le3 = ( REAL(ExtState%TK%Arr%Val(I,J,ref4), sp)           &
-                - REAL(ExtState%TK%Arr%Val(I,J,ref1), sp) )          &
-              / ( Zh(ref4) - Zh(ref1) )   ! surface to 500 hPa
-          Le4 = ( REAL(ExtState%TK%Arr%Val(I,J,ref5), sp)           &
-                - REAL(ExtState%TK%Arr%Val(I,J,ref1), sp) )          &
-              / ( Zh(ref5) - Zh(ref1) )   ! surface to 200 hPa
-       ENDIF
+       Le1 = ( REAL(ExtState%TK%Arr%Val(I,J,ref2), sp)           &
+             - REAL(ExtState%T2M%Arr%Val(I,J), sp) )          &
+           / ( Zh(ref2) + 0.5_sp*REAL(HcoState%Grid%BXHEIGHT_M%Val(I,J,ref2), sp) )   ! surface to 850 hPa
+       Le2 = ( REAL(ExtState%TK%Arr%Val(I,J,ref3), sp)           &
+             - REAL(ExtState%T2M%Arr%Val(I,J), sp) )          &
+           / ( Zh(ref3) + 0.5*REAL(HcoState%Grid%BXHEIGHT_M%Val(I,J,ref3), sp ) )   ! surface to 700 hPa
+       Le3 = ( REAL(ExtState%TK%Arr%Val(I,J,ref4), sp)           &
+             - REAL(ExtState%T2M%Arr%Val(I,J), sp) )          &
+           / ( Zh(ref4) + 0.5*REAL(HcoState%Grid%BXHEIGHT_M%Val(I,J,ref4), sp) )  
+       Le4 = ( REAL(ExtState%TK%Arr%Val(I,J,ref5), sp)           &
+             - REAL(ExtState%T2M%Arr%Val(I,J), sp) )          &
+           / ( Zh(ref5) + 0.5*REAL(HcoState%Grid%BXHEIGHT_M%Val(I,J,ref5), sp) )   ! surface to 200 hPa
 
 !       save_Le1(I,J) = Le1
 !       save_Le2(I,J) = Le2
@@ -562,7 +556,7 @@ CONTAINS
     ExtState%TK%DoUse       = .TRUE.    ! 3D temperature [K]
     ExtState%AIRDEN%DoUse   = .TRUE.    ! 3D dry air density [kg/m3]
     ExtState%PSC2_WET%DoUse = .TRUE.    ! 2D surface pressure [hPa]
-
+    ExtState%T2M%DoUse      = .TRUE.    ! 2D surface temperature [K]
     ! Register the plume top height diagnostic. Created here in code (not in
     ! HEMCO_Diagn.rc) so we can set AutoFill=0, preventing HEMCO from
     ! auto-populating it with CO emission data. OutOper='Mean' disables
