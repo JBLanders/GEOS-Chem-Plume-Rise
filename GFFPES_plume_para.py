@@ -56,6 +56,11 @@ lonmax = -52.5
 
 eps = 1e-20  # small number to avoid floating-point exclusion of max boundary
 
+# Set the mode of calculation
+# calc_qo is the mode that generates files where the plume rise algorithm calculates qo itself
+# use_qo is the mode that generates files where the plume rise algorithm uses qo as a known variable
+fire_mode = 'calc_qo' # 'use_qo'
+
 # --- INITIALIZE ---
 
 ndays = (enddate - startdate).days + 1
@@ -92,11 +97,17 @@ def process_one_day(the_date: dt.datetime):
 
     ntimes = 24 if dohourly else 1
 
-    # Arrays for the four output fields
-    co_data     = np.zeros([ntimes, nlats, nlons])  # CO emission rate (g/s, converted later)
-    qo_data     = np.zeros([ntimes, nlats, nlons])  # fire energy [J]
-    area_burned = np.zeros([ntimes, nlats, nlons])  # burned area [km2]
-    zplume_data = np.zeros([ntimes, nlats, nlons])  # plume injection height [m]
+    # Arrays for the output fields
+    co_data      = np.zeros([ntimes, nlats, nlons])  # CO emission rate (g/s, converted later)
+    zplume_data  = np.zeros([ntimes, nlats, nlons])  # plume injection height [m]
+    if fire_mode == 'calc_qo':
+        tfc_data     = np.zeros([ntimes, nlats, nlons])  # total fuel consumed per unit area [kg/m2]
+        garea_burned = np.zeros([ntimes, nlats, nlons])  # Growth of area burned different from area burned! [km2]
+    elif fire_mode == 'use_qo':
+        area_burned  = np.zeros([ntimes, nlats, nlons])  # burned area [km2]
+        qo_data      = np.zeros([ntimes, nlats, nlons])  # fire energy [J]
+    else:
+        print('Incorrect fire_mode string')
 
     # Each CFFEPS file is named one day ahead: the file for (the_date + 1) contains
     # the forecasts generated from fires detected on the_date.
@@ -163,13 +174,20 @@ def process_one_day(the_date: dt.datetime):
                         for fire_type in 'FSR':
                             co_data[time_index, lat_ind, lon_ind] += float(row[' CO ' + fire_type].iloc[0])
 
-                        # Area(t) is in hectares; convert to km2 (1 ha = 0.01 km2)
-                        area_burned[time_index, lat_ind, lon_ind] += dataframe[' Area(t)'].iloc[i] * 0.01
-                        qo_data[time_index, lat_ind, lon_ind]     += dataframe[' Qo'].iloc[i]
                         # Take max Zplume across fires in the same grid cell/hour
                         zplume_data[time_index, lat_ind, lon_ind]  = max(
                             zplume_data[time_index, lat_ind, lon_ind],
                             float(dataframe[' Zplume'].iloc[i]))
+
+                        if fire_mode == 'calc_qo':
+                            tfc_data[time_index, lat_ind, lon_ind]    += dataframe[' tfc'].iloc[i]
+                            garea_data[time_index, lat_ind, lon_ind]  += dataframe[' Growth(t)'].iloc[i] * 0.01 # in km2
+                        elif fire_mode == 'use_qo':
+                            # Area(t) is in hectares; convert to km2 (1 ha = 0.01 km2)
+                            area_burned[time_index, lat_ind, lon_ind] += dataframe[' Area(t)'].iloc[i] * 0.01
+                            qo_data[time_index, lat_ind, lon_ind]     += dataframe[' Qo'].iloc[i]
+                        else:
+                            print('Incorrect fire_mode string')
 
                     elif fileformat == '2022':
                         co_data[time_index, lat_ind, lon_ind] += float(row[' ECO '].iloc[0])
@@ -245,19 +263,36 @@ def process_one_day(the_date: dt.datetime):
         nc_co.long_name     = 'carbon monoxide emission rate'
         nc_co.units         = 'kg / m2 / s'
 
-        # Fire energy
-        nc_qo               = ncfile.createVariable('Qo', 'f4', ('time', 'lat', 'lon'))
-        nc_qo[:]            = qo_data[:]
-        nc_qo.standard_name = 'fire energy'
-        nc_qo.long_name     = 'fire energy'
-        nc_qo.units         = 'J'
+        if fire_mode == 'use_qo':
+            # Fire energy
+            nc_qo               = ncfile.createVariable('Qo', 'f4', ('time', 'lat', 'lon'))
+            nc_qo[:]            = qo_data[:]
+            nc_qo.standard_name = 'fire energy'
+            nc_qo.long_name     = 'fire energy'
+            nc_qo.units         = 'J'
 
-        # Burned area
-        nc_area               = ncfile.createVariable('BurnAreaTot', 'f4', ('time', 'lat', 'lon'))
-        nc_area[:]            = area_burned[:]
-        nc_area.standard_name = 'total burned area'
-        nc_area.long_name     = 'total burned area'
-        nc_area.units         = 'km^2'
+            # Burned area
+            nc_area               = ncfile.createVariable('BurnAreaTot', 'f4', ('time', 'lat', 'lon'))
+            nc_area[:]            = area_burned[:]
+            nc_area.standard_name = 'total burned area'
+            nc_area.long_name     = 'total burned area'
+            nc_area.units         = 'km^2'
+        elif fire_mode == 'calc_qo':
+            # Total Fuel Consumed
+            nc_tfc                  = ncfile.createVariable('tfc', 'f4', ('time', 'lat', 'lon'))
+            nc_tfc[:]               = tfc_data[:]
+            nc_tfc.standard_name    = 'total fuel consumed'
+            nc_tfc.long_name        = 'total fuel consumed'
+            nc_tfc.units            = 'km / m2'
+
+            # Area actually burned in timestep
+            nc_garea                = ncfile.createVariable('AreaBurned', 'f4', ('time', 'lat', 'lon'))
+            nc_garea                = garea_data[:]
+            nc_garea.standard_name  = 'Area Burned'
+            nc_garea.long_name      = 'Area Burned'
+            nc_tfc.units            = 'km^2'
+        else:
+            print('Incorrect fire mode selected')
 
         # Plume injection height
         nc_zplume               = ncfile.createVariable('Zplume', 'f4', ('time', 'lat', 'lon'))
