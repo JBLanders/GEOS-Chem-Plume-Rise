@@ -143,7 +143,7 @@ CONTAINS
 !    REAL(sp), ALLOCATABLE :: save_Le1(:,:), save_Le2(:,:), save_Le3(:,:), save_Le4(:,:)
     REAL(sp), ALLOCATABLE :: save_ref1(:,:), save_ref2(:,:), save_ref3(:,:), save_ref4(:,:), save_ref5(:,:)
     REAL(sp), ALLOCATABLE :: save_Pres(:,:,:)
-    REAL(sp), ALLOCATABLE :: hypso_Zh(:,:,:), save_Zh(:,:,:)
+!    REAL(sp), ALLOCATABLE :: hypso_Zh(:,:,:), save_Zh(:,:,:)
 
     !=================================================================
     ! HCOX_Plume_Run begins here!
@@ -206,7 +206,8 @@ CONTAINS
     ALLOCATE( Ph(NZ), Zh(NZ), Rho(NZ), Weight(NZ), Emis3D(NX,NY,NZ), ZPlume2D(NX,NY) )
 !    ALLOCATE( save_Le1(NX,NY), save_Le2(NX,NY), save_Le3(NX,NY), save_Le4(NX,NY) )
     ALLOCATE( save_ref1(NX,NY), save_ref2(NX,NY), save_ref3(NX,NY), save_ref4(NX,NY), save_ref5(NX,NY) )
-    ALLOCATE( save_Pres(NX,NY,NZ), hypso_Zh(NX, NY, NZ), save_Zh(NX,NY,NZ) )
+    ALLOCATE( save_Pres(NX,NY,NZ) )
+!    ALLOCATE( hypso_Zh(NX, NY, NY), save_Zh(NX, NY, NZ) )
     Emis3D   = 0.0_sp
     ZPlume2D = 0.0_sp
 !    save_Le1 = 0.0_sp
@@ -217,8 +218,8 @@ CONTAINS
     save_ref2 = 0.0_sp
     save_ref3 = 0.0_sp
     save_ref4 = 0.0_sp
-    save_ref4 = 0.0_sp
-    save_Pres = 0.0_sp
+    save_ref5 = 0.0_sp
+!    save_Pres = 0.0_sp
     !=================================================================
     ! Start looping through boxes. 
     ! L=1 = surface, L=NZ = top
@@ -252,21 +253,21 @@ CONTAINS
        ENDDO
 
        ! Altitude via hypsometric equation; set Z=0 at surface (L=1)
-       Zh(1) = 0.0_sp
-       DO L = 2, NZ
-          Zh(L) = Zh(L-1)                                                  &
-                + ( RGASD_CF / GRAV_CF )                                    &
-                * 0.5_sp * ( REAL(ExtState%TK%Arr%Val(I,J,L-1), sp)        &
-                           + REAL(ExtState%TK%Arr%Val(I,J,L),   sp) )      &
-                * LOG( Ph(L-1) / Ph(L) )
-          hypso_Zh(I,J,L) = Zh(L)
-       ENDDO
+!       Zh(1) = 0.0_sp
+!       DO L = 2, NZ
+!          Zh(L) = Zh(L-1)                                                  &
+!                + ( RGASD_CF / GRAV_CF )                                    &
+!                * 0.5_sp * ( REAL(ExtState%TK%Arr%Val(I,J,L-1), sp)        &
+!                           + REAL(ExtState%TK%Arr%Val(I,J,L),   sp) )      &
+!                * LOG( Ph(L-1) / Ph(L) )
+!          hypso_Zh(I,J,L) = Zh(L)
+!       ENDDO
 
        ! Build Alititude using BXH Values
        Zh(1) = 0.0_sp
        DO L = 2, NZ
           Zh(L) = Zh(L-1) + REAL(HcoState%Grid%BXHEIGHT_M%Val(I,J,L-1), sp)
-          save_Zh(I,J,L) = Zh(L)
+!          save_Zh(I,J,L) = Zh(L)
        ENDDO
        ! Find the vertical layer for 800, 700, 500 and 200 hPa to calculate lapse rates later
        ref1 = 1   ! surface
@@ -296,6 +297,10 @@ CONTAINS
 
        ! Environmental lapse rates at reference levels
        ! Le = (T_upper - T_surface) / (Z_upper - Z_surface)
+       ! Zh is the altitude at the bottom of the box. I assume TK is the
+       ! midpoint temperature, so we add 0.5 of box height of refX to find the
+       ! altitude at the midpoint (technically T2M is the temp at 2m but who
+       ! cares
        Le1 = 0.0_sp; Le2 = 0.0_sp; Le3 = 0.0_sp; Le4 = 0.0_sp
 
        Le1 = ( REAL(ExtState%TK%Arr%Val(I,J,ref2), sp)           &
@@ -319,7 +324,7 @@ CONTAINS
        ! Preamble calculations done, now start the Anderson algorithm
 
        ! Initalize initial variables
-       tsurf  = REAL( ExtState%TK%Arr%Val(I,J,1), sp )     ! surface-layer T [K]
+       tsurf  = REAL( ExtState%T2M%Arr%Val(I,J), sp )     ! surface-layer T [K]
        ps     = ExtState%PSC2_WET%Arr%Val(I,J) * 100.0_sp  ! hPa -> Pa
        area   = Area_ij * 1.0e6_sp                          ! km2 -> m2
 
@@ -438,8 +443,8 @@ CONTAINS
     CALL Diagn_Update( HcoState, cName='ref4', Array2D=save_ref4, RC=RC )
     CALL Diagn_Update( HcoState, cName='ref5', Array2D=save_ref5, RC=RC )
     CALL Diagn_Update( HcoState, cName='PressureF', Array3D=save_Pres, RC=RC )
-    CALL Diagn_Update( HcoState, cName='Hypso_Zh', Array3D=hypso_Zh, RC=RC )
-    CALL Diagn_Update( HcoState, cName='BX_Zh', Array3D=save_Zh, RC=RC )
+!    CALL Diagn_Update( HcoState, cName='Hypso_Zh', Array3D=hypso_Zh, RC=RC )
+!    CALL Diagn_Update( HcoState, cName='BX_Zh', Array3D=save_Zh, RC=RC )
     IF (RC /= HCO_SUCCESS ) THEN
        MSG = 'Diagn_Update error: plume rise'
        CALL HCO_ERROR( MSG, RC )
@@ -451,7 +456,7 @@ CONTAINS
 !    DEALLOCATE( save_Le1, save_Le2, save_Le3, save_Le4 )
     DEALLOCATE( save_ref1, save_ref2, save_ref3, save_ref4, save_ref5 )
     DEALLOCATE( save_Pres )
-    DEALLOCATE( hypso_Zh, save_Zh ) 
+!    DEALLOCATE( hypso_Zh, save_Zh ) 
     Inst => NULL()
 
     CALL HCO_LEAVE( HcoState%Config%Err, RC )
@@ -664,24 +669,24 @@ CONTAINS
                        COL = HcoState%Diagn%HcoDiagnIDDefault, &
                        RC = RC )
 
-    CALL Diagn_Create( HcoState, &
-                       cName = 'Hypso_Zh', &
-                       ExtNr = Inst%ExtNr, &
-                       SpaceDim = 3, &
-                       OutUnit = 'm', &
-                       OutOper = 'Mean', &
-                       AutoFill = 0, &
-                       COL = HcoState%Diagn%HcoDiagnIDDefault, &
-                       RC = RC)
-    CALL Diagn_Create( HcoState, &
-                       cName = 'BX_Zh', &
-                       ExtNr = Inst%ExtNr, &
-                       SpaceDim = 3, &
-                       OutUnit = 'm', &
-                       OutOper = 'Mean', &
-                       AutoFill = 0, &
-                       COL = HcoState%Diagn%HcoDiagnIDDefault, &
-                       RC = RC )
+!    CALL Diagn_Create( HcoState, &
+!                       cName = 'Hypso_Zh', &
+!                       ExtNr = Inst%ExtNr, &
+!                       SpaceDim = 3, &
+!                       OutUnit = 'm', &
+!                       OutOper = 'Mean', &
+!                       AutoFill = 0, &
+!                       COL = HcoState%Diagn%HcoDiagnIDDefault, &
+!                       RC = RC)
+!    CALL Diagn_Create( HcoState, &
+!                       cName = 'BX_Zh', &
+!                       ExtNr = Inst%ExtNr, &
+!                       SpaceDim = 3, &
+!                       OutUnit = 'm', &
+!                       OutOper = 'Mean', &
+!                       AutoFill = 0, &
+!                       COL = HcoState%Diagn%HcoDiagnIDDefault, &
+!                       RC = RC )
 
 
     IF ( RC /= HCO_SUCCESS ) THEN
