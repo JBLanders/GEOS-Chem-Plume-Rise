@@ -181,7 +181,7 @@ def process_one_day(the_date: dt.datetime):
 
                         if fire_mode == 'calc_qo':
                             tfc_data[time_index, lat_ind, lon_ind]    += dataframe[' tfc'].iloc[i]
-                            garea_data[time_index, lat_ind, lon_ind]  += dataframe[' Growth(t)'].iloc[i] * 0.01 # in km2
+                            garea_burned[time_index, lat_ind, lon_ind]  += dataframe[' Growth (t)'].iloc[i] * 0.01 # in km2
                         elif fire_mode == 'use_qo':
                             # Area(t) is in hectares; convert to km2 (1 ha = 0.01 km2)
                             area_burned[time_index, lat_ind, lon_ind] += dataframe[' Area(t)'].iloc[i] * 0.01
@@ -287,10 +287,10 @@ def process_one_day(the_date: dt.datetime):
 
             # Area actually burned in timestep
             nc_garea                = ncfile.createVariable('AreaBurned', 'f4', ('time', 'lat', 'lon'))
-            nc_garea                = garea_data[:]
+            nc_garea[:]                = garea_burned[:]
             nc_garea.standard_name  = 'Area Burned'
             nc_garea.long_name      = 'Area Burned'
-            nc_tfc.units            = 'km^2'
+            nc_garea.units            = 'km^2'
         else:
             print('Incorrect fire mode selected')
 
