@@ -103,6 +103,7 @@ def process_one_day(the_date: dt.datetime):
     if fire_mode == 'calc_qo':
         tfc_data     = np.zeros([ntimes, nlats, nlons])  # total fuel consumed per unit area [kg/m2]
         garea_burned = np.zeros([ntimes, nlats, nlons])  # Growth of area burned different from area burned! [km2]
+        area_burned  = np.zeros([ntimes, nlats, nlons])  # burned area [km2]
     elif fire_mode == 'use_qo':
         area_burned  = np.zeros([ntimes, nlats, nlons])  # burned area [km2]
         qo_data      = np.zeros([ntimes, nlats, nlons])  # fire energy [J]
@@ -182,6 +183,7 @@ def process_one_day(the_date: dt.datetime):
                         if fire_mode == 'calc_qo':
                             tfc_data[time_index, lat_ind, lon_ind]    += dataframe[' tfc'].iloc[i]
                             garea_burned[time_index, lat_ind, lon_ind]  += dataframe[' Growth (t)'].iloc[i] * 0.01 # in km2
+                            area_burned[time_index, lat_ind, lon_ind] += dataframe[' Area(t)'].iloc[i] * 0.01
                         elif fire_mode == 'use_qo':
                             # Area(t) is in hectares; convert to km2 (1 ha = 0.01 km2)
                             area_burned[time_index, lat_ind, lon_ind] += dataframe[' Area(t)'].iloc[i] * 0.01
@@ -277,6 +279,13 @@ def process_one_day(the_date: dt.datetime):
             nc_area.standard_name = 'total burned area'
             nc_area.long_name     = 'total burned area'
             nc_area.units         = 'km^2'
+
+            # Area actually burned in timestep
+            nc_garea                = ncfile.createVariable('AreaBurned', 'f4', ('time', 'lat', 'lon'))
+            nc_garea[:]                = garea_burned[:]
+            nc_garea.standard_name  = 'Area Burned'
+            nc_garea.long_name      = 'Area Burned'
+            nc_garea.units            = 'km^2'
         elif fire_mode == 'calc_qo':
             # Total Fuel Consumed
             nc_tfc                  = ncfile.createVariable('tfc', 'f4', ('time', 'lat', 'lon'))
