@@ -210,7 +210,7 @@ CONTAINS
 
     CALL HCO_EvalFld( HcoState, 'Fire_TFC', Inst%Fire_TFC, RC )
     IF (RC /= HCO_SUCCESS ) THEN
-       CALL HCO_ERROR( 'Cannot get Fire_TFC field', TC, THISLOC=LOC )
+       CALL HCO_ERROR( 'Cannot get Fire_TFC field', RC, THISLOC=LOC )
        RETURN
     ENDIF
 
@@ -241,11 +241,14 @@ CONTAINS
        ! Preliminary stuff setting up values before calculations
 
        ! Read fire parameters parameters for this box
-       TFC_ij   = REAL( Inst%Fire_TFC(I,J),          sp )  ! Total Fuel consumed [J]
+       TFC_ij   = REAL( Inst%Fire_TFC(I,J),          sp )  ! Total Fuel consumed [kg/m2]
        GrowthArea_ij = REAL( Inst%Fire_GrowthArea(I,J),  sp )  ! Fire area burned area [km2]
+       BurnArea_ij = REAL( Inst%Fire_BurnAreaTot(I,J), sp ) !Total burned area for fire plume [km2]
        CO_ij   = REAL( Inst%Fire_CO(I,J),           sp )  ! CO flux [kg/m2/s]
 
-       Qo_ij = TFC_ij * GrowthArea_ij * H * Fire_Eff
+       ! Energy is Total fuel consumed [kg/m2] * burned area [km2] * Heat of combustion [J/kg] * Fire efficiency * area conversion
+       ! [m2/km2]
+       Qo_ij = TFC_ij * GrowthArea_ij * H * Fire_Eff * 1.0e6_sp
        ! Skip columns with no fire emissions or fire energy ??? WRONG?? FIX???
        IF ( Qo_ij <= 0.0_sp .OR. CO_ij <= 0.0_sp ) CYCLE
 
