@@ -13,8 +13,9 @@
 !\\
 ! Required HEMCO_Config.rc base fields:
 !   Fire_CO          - 2D CO emission rate [kg/m2/s]  (NetCDF var: ECO)
-!   Fire_QO          - 2D fire energy      [J]         (NetCDF var: Qo)
-!   Fire_BurnAreaTot - 2D burned area      [km2]       (NetCDF var: BurnAreaTot)
+!   Fire_TFC         - 2D fire energy      [kg/m2]    (NetCDF var: ??)
+!   Fire_BurnAreaTot - 2D burned area      [km2]      (NetCDF var: BurnAreaTot)
+!   Fire_GrowthArea  - 2D new area burned  [km2]      (NetCDF var: ???) 
 ! 
 !  Other things that have been changed:
 !       - added init run and final to hcox_driver_mod.F90
@@ -80,6 +81,7 @@ MODULE HCOX_Plume_Mod
     REAL(hp), POINTER :: Fire_GrowthArea(:,:)  => NULL()  ! Area burned by fuel  [km2]
     REAL(hp), POINTER :: Fire_TFC(:,:)         => NULL()  ! Total fire consumed [kg/m2]
     REAL(hp), POINTER :: Fire_BurnAreaTot(:,:) => NULL()  ! burned area [km2]
+!    REAL(hp), POINTER :: LANDTYPE(:,:,:)       => NULL()  ! land type
 
   END TYPE MyInst
 
@@ -144,10 +146,7 @@ CONTAINS
     REAL(sp), ALLOCATABLE :: Weight(:)                          ! vertical distribution weights
     REAL(sp), ALLOCATABLE :: Emis3D(:,:,:)                      ! 3D CO emissions [kg/m2/s]
     REAL(sp), ALLOCATABLE :: ZPlume2D(:,:)                      ! save plume top height [m]
-!    REAL(sp), ALLOCATABLE :: save_Le1(:,:), save_Le2(:,:), save_Le3(:,:), save_Le4(:,:)
-    REAL(sp), ALLOCATABLE :: save_ref1(:,:), save_ref2(:,:), save_ref3(:,:), save_ref4(:,:), save_ref5(:,:)
-    REAL(sp), ALLOCATABLE :: save_Pres(:,:,:)
-!    REAL(sp), ALLOCATABLE :: hypso_Zh(:,:,:), save_Zh(:,:,:)
+    REAL(sp), ALLOCATABLE :: save_Qo(:,:)  !diagn
 
     !=================================================================
     ! HCOX_Plume_Run begins here!
@@ -216,22 +215,10 @@ CONTAINS
 
     ! Allocate arrays some arrays
     ALLOCATE( Ph(NZ), Zh(NZ), Rho(NZ), Weight(NZ), Emis3D(NX,NY,NZ), ZPlume2D(NX,NY) )
-!    ALLOCATE( save_Le1(NX,NY), save_Le2(NX,NY), save_Le3(NX,NY), save_Le4(NX,NY) )
-    ALLOCATE( save_ref1(NX,NY), save_ref2(NX,NY), save_ref3(NX,NY), save_ref4(NX,NY), save_ref5(NX,NY) )
-    ALLOCATE( save_Pres(NX,NY,NZ) )
-!    ALLOCATE( hypso_Zh(NX, NY, NY), save_Zh(NX, NY, NZ) )
+    ALLOCATE( save_Qo(NX,NY) )
     Emis3D   = 0.0_sp
     ZPlume2D = 0.0_sp
-!    save_Le1 = 0.0_sp
-!    save_Le2 = 0.0_sp
-!    save_Le3 = 0.0_sp
-!    save_Le4 = 0.0_sp
-    save_ref1 = 0.0_sp
-    save_ref2 = 0.0_sp
-    save_ref3 = 0.0_sp
-    save_ref4 = 0.0_sp
-    save_ref5 = 0.0_sp
-!    save_Pres = 0.0_sp
+
     !=================================================================
     ! Start looping through boxes. 
     ! L=1 = surface, L=NZ = top
@@ -249,44 +236,27 @@ CONTAINS
        ! Energy is Total fuel consumed [kg/m2] * burned area [km2] * Heat of combustion [J/kg] * Fire efficiency * area conversion
        ! [m2/km2]
        Qo_ij = TFC_ij * GrowthArea_ij * H * Fire_Eff * 1.0e6_sp
-       ! Skip columns with no fire emissions or fire energy ??? WRONG?? FIX???
-       IF ( Qo_ij <= 0.0_sp .OR. CO_ij <= 0.0_sp ) CYCLE
+       save_Qo(I,J) = Qo_ij
 
-       ! Build Pressure, air density and altitude array from ExtState variables
-       !DO L = 1, NZ
-       !   Ph(L)  = REAL( ExtState%AIRDEN%Arr%Val(I,J,L), sp ) &
-       !          * RGASD_CF                                      &
-       !          * REAL( ExtState%TK%Arr%Val(I,J,L),     sp )   &
-       !          / 100.0_sp                   ! [Pa] -> [hPa]
-       !   save_Pres(I,J,L) = Ph(L)
-       !   Rho(L) = REAL( ExtState%AIRDEN%Arr%Val(I,J,L), sp )   ! [kg/m3]
-       !ENDDO
+       ! Skip columns with no fire emissions or fire energy ??? WRONG?? FIX???
+       IF ( Qo_ij <= 0.0_sp .OR. CO_ij <= 0.0_sp .OR. BurnArea_ij < 0.0_sp ) CYCLE
+
+       ! Build Pressure Array as midpoint of edge pressures
+       ! Airdensity just from AIRDEN
        DO L = 1, NZ
           Ph(L) = ( REAL( HcoState%Grid%PEDGE%Val(I,J,L), sp ) + &     
                   REAL( HcoState%Grid%PEDGE%Val(I,J,L+1), sp ) ) / 2.0_sp
-          save_Pres(I,J,L) = Ph(L)
           Rho(L) = REAL( ExtState%AIRDEN%Arr%Val(I,J,L), sp)
        ENDDO
 
-       ! Altitude via hypsometric equation; set Z=0 at surface (L=1)
-!       Zh(1) = 0.0_sp
-!       DO L = 2, NZ
-!          Zh(L) = Zh(L-1)                                                  &
-!                + ( RGASD_CF / GRAV_CF )                                    &
-!                * 0.5_sp * ( REAL(ExtState%TK%Arr%Val(I,J,L-1), sp)        &
-!                           + REAL(ExtState%TK%Arr%Val(I,J,L),   sp) )      &
-!                * LOG( Ph(L-1) / Ph(L) )
-!          hypso_Zh(I,J,L) = Zh(L)
-!       ENDDO
-
-       ! Build Alititude using BXH Values
+       ! Zh is altitude at the BOTTOM of the grid box
        Zh(1) = 0.0_sp
        DO L = 2, NZ
           Zh(L) = Zh(L-1) + REAL(HcoState%Grid%BXHEIGHT_M%Val(I,J,L-1), sp)
-!          save_Zh(I,J,L) = Zh(L)
        ENDDO
+
        ! Find the vertical layer for 800, 700, 500 and 200 hPa to calculate lapse rates later
-       ref1 = 1   ! surface
+       ref1 = 1   ! surface Should delete ref1  and/or switch ref2->ref1, ref3->ref2 etc.
        ref2 = NZ  ! defaults in case threshold not found in column
        ref3 = NZ
        ref4 = NZ
@@ -305,12 +275,6 @@ CONTAINS
           IF ( Ph(L) <= 20000.0_sp ) THEN; ref5 = L; EXIT; ENDIF
        ENDDO
 
-       save_ref1(I,J) = ref1
-       save_ref2(I,J) = ref2
-       save_ref3(I,J) = ref3
-       save_ref4(I,J) = ref4
-       save_ref5(I,J) = ref5
-
        ! Environmental lapse rates at reference levels
        ! Le = (T_upper - T_surface) / (Z_upper - Z_surface)
        ! Zh is the altitude at the bottom of the box. I assume TK is the
@@ -318,7 +282,6 @@ CONTAINS
        ! altitude at the midpoint (technically T2M is the temp at 2m but who
        ! cares
        Le1 = 0.0_sp; Le2 = 0.0_sp; Le3 = 0.0_sp; Le4 = 0.0_sp
-
        Le1 = ( REAL(ExtState%TK%Arr%Val(I,J,ref2), sp)           &
              - REAL(ExtState%T2M%Arr%Val(I,J), sp) )          &
            / ( Zh(ref2) + 0.5_sp*REAL(HcoState%Grid%BXHEIGHT_M%Val(I,J,ref2), sp) )   ! surface to 850 hPa
@@ -332,10 +295,6 @@ CONTAINS
              - REAL(ExtState%T2M%Arr%Val(I,J), sp) )          &
            / ( Zh(ref5) + 0.5*REAL(HcoState%Grid%BXHEIGHT_M%Val(I,J,ref5), sp) )   ! surface to 200 hPa
 
-!       save_Le1(I,J) = Le1
-!       save_Le2(I,J) = Le2
-!       save_Le3(I,J) = Le3
-!       save_Le4(I,J) = Le4
 
        ! Preamble calculations done, now start the Anderson algorithm
 
@@ -448,19 +407,8 @@ CONTAINS
     ENDDO
 
     ! Write diagnosed plume top heights to the ZPlume_Calc diagnostic
-    CALL Diagn_Update( HcoState, cName='ZPlume_Calc', Array2D=ZPlume2D, RC=RC )
- !   CALL Diagn_Update( HcoState, cName='Le1', Array2D=save_Le1, RC=RC )
- !   CALL Diagn_Update( HcoState, cName='Le2', Array2D=save_Le2, RC=RC )
-!    CALL Diagn_Update( HcoState, cName='Le3', Array2D=save_Le3, RC=RC )
-!    CALL Diagn_Update( HcoState, cName='Le4', Array2D=save_Le3, RC=RC )
-    CALL Diagn_Update( HcoState, cName='ref1', Array2D=save_ref1, RC=RC )
-    CALL Diagn_Update( HcoState, cName='ref2', Array2D=save_ref2, RC=RC )
-    CALL Diagn_Update( HcoState, cName='ref3', Array2D=save_ref3, RC=RC )
-    CALL Diagn_Update( HcoState, cName='ref4', Array2D=save_ref4, RC=RC )
-    CALL Diagn_Update( HcoState, cName='ref5', Array2D=save_ref5, RC=RC )
-    CALL Diagn_Update( HcoState, cName='PressureF', Array3D=save_Pres, RC=RC )
-!    CALL Diagn_Update( HcoState, cName='Hypso_Zh', Array3D=hypso_Zh, RC=RC )
-!    CALL Diagn_Update( HcoState, cName='BX_Zh', Array3D=save_Zh, RC=RC )
+    CALL Diagn_Update( HcoState, cName='ZPlume', Array2D=ZPlume2D, RC=RC )
+    CALL Diagn_Update( HcoState, cName='save_Qo', Array2D=save_Qo, RC=RC )
     IF (RC /= HCO_SUCCESS ) THEN
        MSG = 'Diagn_Update error: plume rise'
        CALL HCO_ERROR( MSG, RC )
@@ -469,10 +417,7 @@ CONTAINS
 
     ! Cleanup
     DEALLOCATE( Ph, Zh, Rho, Weight, Emis3D, ZPlume2D )
-!    DEALLOCATE( save_Le1, save_Le2, save_Le3, save_Le4 )
-    DEALLOCATE( save_ref1, save_ref2, save_ref3, save_ref4, save_ref5 )
-    DEALLOCATE( save_Pres )
-!    DEALLOCATE( hypso_Zh, save_Zh ) 
+    DEALLOCATE( save_Qo )
     Inst => NULL()
 
     CALL HCO_LEAVE( HcoState%Config%Err, RC )
@@ -583,7 +528,7 @@ CONTAINS
     ! auto-populating it with CO emission data. OutOper='Mean' disables
     ! automatic unit conversion (data in metres, not kg/m2/s).
     CALL Diagn_Create( HcoState,                                            &
-                       cName     = 'ZPlume_Calc',                           &
+                       cName     = 'ZPlume',                           &
                        long_name = 'thermodynamic_plume_injection_height',   &
                        ExtNr     = Inst%ExtNr,                              &
                        SpaceDim  = 2,                                        &
@@ -592,117 +537,15 @@ CONTAINS
                        AutoFill  = 0,                                        &
                        COL       = HcoState%Diagn%HcoDiagnIDDefault,         &
                        RC        = RC                                        )
-
-!    CALL Diagn_Create( HcoState, &
-!                       cName = 'Le1', &
-!                       ExtNr = Inst%ExtNr, &
-!                       SpaceDim = 2, &
-!                       OutUnit = 'K/m', &
-!                       OutOper = 'Mean', &
-!                       AutoFill = 0, &
-!                       COL = HcoState%Diagn%HcoDiagnIDDefault, &
-!                       RC = RC )
- !   CALL Diagn_Create( HcoState, &
- !                      cName = 'Le2', &
- !                      ExtNr = Inst%ExtNr, &
- !                      SpaceDim = 2, &
- !                      OutUnit = 'm', &
- !                      OutOper = 'Mean', &
- !                      AutoFill = 0, &
-!                       COL = HcoState%Diagn%HcoDiagnIDDefault, &
-!                       RC = RC )
-!    CALL Diagn_Create( HcoState, &
-!                       cName = 'Le3', &
-!                       ExtNr = Inst%ExtNr, &
-!                       SpaceDim = 2, &
-!                       OutUnit = 'm', &
-!                       OutOper = 'Mean', &
-!                       AutoFill = 0, &
-!                       COL = HcoState%Diagn%HcoDiagnIDDefault, &
-!                       RC = RC )
-!    CALL Diagn_Create( HcoState, &
-!                       cName = 'Le4', &
-!                       ExtNr = Inst%ExtNr, &
-!                       SpaceDim = 2, &
-!                       OutUnit = 'm', &
-!                       OutOper = 'Mean', &
-!                       AutoFill = 0, &
-!                       COL = HcoState%Diagn%HcoDiagnIDDefault, &
-!                       RC = RC )
-
     CALL Diagn_Create( HcoState, &
-                       cName = 'ref1', &
+                       cName = 'save_Qo', &
                        ExtNr = Inst%ExtNr, &
                        SpaceDim = 2, &
-                       OutUnit = 'm', &
+                       OutUnit = 'J', &
                        OutOper = 'Mean', &
                        AutoFill = 0, &
                        COL = HcoState%Diagn%HcoDiagnIDDefault, &
                        RC = RC )
-    CALL Diagn_Create( HcoState, &
-                       cName = 'ref2', &
-                       ExtNr = Inst%ExtNr, &
-                       SpaceDim = 2, &
-                       OutUnit = 'm', &
-                       OutOper = 'Mean', &
-                       AutoFill = 0, &
-                       COL = HcoState%Diagn%HcoDiagnIDDefault, &
-                       RC = RC )
-    CALL Diagn_Create( HcoState, &
-                       cName = 'ref3', &
-                       ExtNr = Inst%ExtNr, &
-                       SpaceDim = 2, &
-                       OutUnit = 'm', &
-                       OutOper = 'Mean', &
-                       AutoFill = 0, &
-                       COL = HcoState%Diagn%HcoDiagnIDDefault, &
-                       RC = RC )
-    CALL Diagn_Create( HcoState, &
-                       cName = 'ref4', &
-                       ExtNr = Inst%ExtNr, &
-                       SpaceDim = 2, &
-                       OutUnit = 'm', &
-                       OutOper = 'Mean', &
-                       AutoFill = 0, &
-                       COL = HcoState%Diagn%HcoDiagnIDDefault, &
-                       RC = RC )
-    CALL Diagn_Create( HcoState, &
-                       cName = 'ref5', &
-                       ExtNr = Inst%ExtNr, &
-                       SpaceDim = 2, &
-                       OutUnit = 'm', &
-                       OutOper = 'Mean', &
-                       AutoFill = 0, &
-                       COL = HcoState%Diagn%HcoDiagnIDDefault, &
-                       RC = RC )
-    CALL Diagn_Create( HcoState, &
-                       cName = 'PressureF', &
-                       ExtNr = Inst%ExtNr, &
-                       SpaceDim =3, &
-                       OutUnit = 'Pa', &
-                       OutOper = 'Mean', &
-                       AutoFill = 0, &
-                       COL = HcoState%Diagn%HcoDiagnIDDefault, &
-                       RC = RC )
-
-!    CALL Diagn_Create( HcoState, &
-!                       cName = 'Hypso_Zh', &
-!                       ExtNr = Inst%ExtNr, &
-!                       SpaceDim = 3, &
-!                       OutUnit = 'm', &
-!                       OutOper = 'Mean', &
-!                       AutoFill = 0, &
-!                       COL = HcoState%Diagn%HcoDiagnIDDefault, &
-!                       RC = RC)
-!    CALL Diagn_Create( HcoState, &
-!                       cName = 'BX_Zh', &
-!                       ExtNr = Inst%ExtNr, &
-!                       SpaceDim = 3, &
-!                       OutUnit = 'm', &
-!                       OutOper = 'Mean', &
-!                       AutoFill = 0, &
-!                       COL = HcoState%Diagn%HcoDiagnIDDefault, &
-!                       RC = RC )
 
 
     IF ( RC /= HCO_SUCCESS ) THEN
