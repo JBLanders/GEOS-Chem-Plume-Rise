@@ -46,9 +46,9 @@ import tqdm
 # --- PARAMETERS ---
 
 # location of CFFEPS csv input files
-filedir = '/Users/julianlanders/OneDrive - University of Toronto/Research Stuff/CFFEPS/InDir/'
+filedir = '/data/high_res/CTM/CFFEPS/2019/'
 # location for output nc files
-outdir = '/Users/julianlanders/OneDrive - University of Toronto/Research Stuff/CFFEPS/OutDir/Claude/'
+outdir = '/data/ctm2/HEMCO/CFFEPS/calc_qo/max_fire/'
 
 # NOTE on startdate / enddate:
 # These are the UTC forecast dates you want in the OUTPUT files, not the input file dates.
@@ -56,8 +56,8 @@ outdir = '/Users/julianlanders/OneDrive - University of Toronto/Research Stuff/C
 # are named by the day the fire reports were processed (one day after the fire activity).
 # Example: to produce output for April 23-29, set startdate=Apr 23 and enddate=Apr 29.
 #          The script will read input files Apr 24 through Apr 30.
-startdate = dt.datetime(2019, 4, 25)  # First UTC forecast date to produce output for
-enddate   = dt.datetime(2019, 4, 27)  # Last  UTC forecast date to produce output for (inclusive)
+startdate = dt.datetime(2019, 1, 1)  # First UTC forecast date to produce output for
+enddate   = dt.datetime(2019, 12, 31)  # Last  UTC forecast date to produce output for (inclusive)
 
 dohourly = True  # Should we do hourly output or daily means?
                  # NOTE: hourly mode (True) is required for the plume rise extension,
@@ -77,12 +77,12 @@ eps = 1e-20  # small number to avoid floating-point exclusion of max boundary
 # Fire energy mode:
 #   'calc_qo' — output TFC + FireGrowth; Fortran computes Qo = H * TFC * FireGrowth * 1e6 * 0.2
 #   'use_qo'  — output pre-computed Qo from CFFEPS CSV directly
-fire_mode = 'calc_qo'
+fire_mode = 'use_qo'
 
 # TFC aggregation mode (only used when fire_mode == 'calc_qo'):
 #   'weighted' — area-weighted average TFC; correct for multi-fire cells
 #   'max_fire' — TFC and growth from the single largest fire in the cell
-tfc_agg_mode = 'weighted'
+tfc_agg_mode = 'max_fire'
 
 # --- INITIALIZE ---
 
@@ -135,7 +135,8 @@ def process_one_day(the_date: dt.datetime):
             garea_burned       = np.zeros([ntimes, nlats, nlons])  # growth of biggest fire [km2]
             max_growth_tracker = np.zeros([ntimes, nlats, nlons])  # tracking array, not written
     elif fire_mode == 'use_qo':
-        qo_data = np.zeros([ntimes, nlats, nlons])  # fire energy [J]
+        qo_data                = np.zeros([ntimes, nlats, nlons])  # fire energy [J]
+        qplume_data            = np.zeros([ntimes, nlats, nlons])  # plume energy [J]
 
     # Each CFFEPS file is named one day ahead: the file for (the_date + 1) contains
     # the forecasts generated from fires detected on the_date.
@@ -224,6 +225,7 @@ def process_one_day(the_date: dt.datetime):
 
                         elif fire_mode == 'use_qo':
                             qo_data[time_index, lat_ind, lon_ind] += dataframe[' Qo'].iloc[i]
+                            qplume_data[time_index, lat_ind, lon_ind] += dataframe[' Qplume'].iloc[i]
 
                     elif fileformat == '2022':
                         co_data[time_index, lat_ind, lon_ind] += float(row[' ECO '].iloc[0])
@@ -254,6 +256,7 @@ def process_one_day(the_date: dt.datetime):
                         elif fire_mode == 'use_qo':
                             try:
                                 qo_data[time_index, lat_ind, lon_ind] += dataframe[' Qo'].iloc[i]
+                                qplume_data[time_index, lat_ind, lon_ind] += dataframe[' Qplume'].iloc[i]
                             except (ValueError, KeyError) as err:
                                 print('qo_data 2022:', err)
 
@@ -349,6 +352,13 @@ def process_one_day(the_date: dt.datetime):
             nc_qo.standard_name = 'fire energy'
             nc_qo.long_name     = 'fire energy'
             nc_qo.units         = 'J'
+
+            nc_qplume           = ncfile.createVariable('Qplume', 'f4', ('time', 'lat', 'lon'))
+            nc_qplume[:]        = qplume_data[:]
+            nc_qplume.standard_name  = 'plume energy'
+            nc_qplume.long_name = 'plume energy'
+            nc_qplume.units     = 'J'
+
 
         elif fire_mode == 'calc_qo':
             nc_tfc              = ncfile.createVariable('TFC', 'f4', ('time', 'lat', 'lon'))
