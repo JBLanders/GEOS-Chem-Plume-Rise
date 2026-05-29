@@ -825,9 +825,9 @@ Mask fractions:              false
 
 # --- CFFEPS plume rise ---
 (((Plume
-0 Fire_CO          $ROOT/CFFEPS/PlumeDataZPlume/$YYYY/$MM/CFFEPS_2x25_$YYYY$MM$DD_weighted_hourly.nc ECO         2019-2023/1-12/1-31/0-23 I xy kg/m2/s * 1013 1 1
+0 Fire_CO          $ROOT/CFFEPS/PlumeDataQPlume/$YYYY/$MM/CFFEPS_2x25_$YYYY$MM$DD_weighted_hourly.nc ECO         2019-2023/1-12/1-31/0-23 I xy kg/m2/s * 1013 1 1
 0 Fire_QPlume      $ROOT/CFFEPS/PlumeDataQPlume/$YYYY/$MM/CFFEPS_2x25_$YYYY$MM$DD_weighted_hourly.nc Qplume          2019-2023/1-12/1-31/0-23 I xy 1       * 1013 1 1
-0 Fire_BurnAreaTot $ROOT/CFFEPS/PlumeDataZPlume/$YYYY/$MM/CFFEPS_2x25_$YYYY$MM$DD_weighted_hourly.nc BurnAreaTot 2019-2023/1-12/1-31/0-23 I xy 1       * 1013 1 1
+0 Fire_BurnAreaTot $ROOT/CFFEPS/PlumeDataQPlume/$YYYY/$MM/CFFEPS_2x25_$YYYY$MM$DD_weighted_hourly.nc BurnAreaTot 2019-2023/1-12/1-31/0-23 I xy 1       * 1013 1 1
 )))Plume
 
 # --- BB4MIPs ---
