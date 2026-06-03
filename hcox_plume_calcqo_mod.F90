@@ -59,6 +59,9 @@ MODULE HCOX_Plume_Mod
   REAL(sp), PARAMETER :: H         = 18000000_sp ! Heat of Combustion for dry wood [J/kg]
   REAL(sp), PARAMETER :: Fire_Eff  = 0.2_sp      ! Effieciency of fire
   INTEGER,  PARAMETER :: IMAX_CF   = 15000       ! max plume height and max iteration [m]
+  INTEGER,  PARAMETER :: FOREST_ID(20) = [3, 4, 5, 6, 21, 22, 23, 24, 25, 26, 27, 43, 54, 60, 61, 62, 77, 78, 95, 96]
+  INTEGER,  PARAMETER :: CROP_ID(11) = [30, 31, 35, 36, 37, 38, 39, 76, 92, 93, 94]
+  INTEGER,  PARAMETER :: GRASS_ID(10) = [2, 10, 41, 42, 46, 47, 51, 52, 59, 64]
 !
 ! !MODULE VARIABLES:
 !
@@ -81,7 +84,7 @@ MODULE HCOX_Plume_Mod
     REAL(hp), POINTER :: Fire_GrowthArea(:,:)  => NULL()  ! Area burned by fuel  [km2]
     REAL(hp), POINTER :: Fire_TFC(:,:)         => NULL()  ! Total fire consumed [kg/m2]
     REAL(hp), POINTER :: Fire_BurnAreaTot(:,:) => NULL()  ! burned area [km2]
-!    REAL(hp), POINTER :: LANDTYPE(:,:,:)       => NULL()  ! land type
+    REAL(hp), POINTER :: LANDTYPE(:,:,:)       => NULL()  ! land type
 
   END TYPE MyInst
 
@@ -134,7 +137,8 @@ CONTAINS
     INTEGER               :: NX, NY, NZ                         ! number of grid cells
     INTEGER               :: ref1, ref2, ref3, ref4, ref5       ! Levels correspoinding to lapse rates
     INTEGER               :: ii, zplm_topL, zplm_nlay           ! plume height top and N layers
-    REAL(sp)              :: Qo_ij, BurnArea_ij, CO_ij          ! fire values at ij
+    REAL(sp)              :: FuelMult                           ! store values of land type coverage
+    REAL(sp)              :: QPlume_ij, BurnArea_ij, CO_ij      ! fire values at ij
     REAL(sp)              :: GrowthArea_ij, TFC_ij              ! fire values at ij
     REAL(sp)              :: Le, Le1, Le2, Le3, Le4             ! different lapse rate values
     REAL(sp)              :: tsurf, ps, area                    ! met/area at each fire
@@ -146,7 +150,7 @@ CONTAINS
     REAL(sp), ALLOCATABLE :: Weight(:)                          ! vertical distribution weights
     REAL(sp), ALLOCATABLE :: Emis3D(:,:,:)                      ! 3D CO emissions [kg/m2/s]
     REAL(sp), ALLOCATABLE :: ZPlume2D(:,:)                      ! save plume top height [m]
-    REAL(sp), ALLOCATABLE :: save_Qo(:,:)  !diagn
+    REAL(sp), ALLOCATABLE :: save_QPlume(:,:)  !diagn
 
     !=================================================================
     ! HCOX_Plume_Run begins here!
@@ -215,7 +219,7 @@ CONTAINS
 
     ! Allocate arrays some arrays
     ALLOCATE( Ph(NZ), Zh(NZ), Rho(NZ), Weight(NZ), Emis3D(NX,NY,NZ), ZPlume2D(NX,NY) )
-    ALLOCATE( save_Qo(NX,NY) )
+    ALLOCATE( save_QPlume(NX,NY) )
     Emis3D   = 0.0_sp
     ZPlume2D = 0.0_sp
 
@@ -233,13 +237,34 @@ CONTAINS
        BurnArea_ij = REAL( Inst%Fire_BurnAreaTot(I,J), sp ) !Total burned area for fire plume [km2]
        CO_ij   = REAL( Inst%Fire_CO(I,J),           sp )  ! CO flux [kg/m2/s]
 
+       FuelMult = 1.0_sp
+       DO II = 1, SIZE(CROP_ID)
+           IF (Inst%LANDTYPE(I,J, CROP_ID(II) + 1 ) > 0.0_sp ) THEN
+               FuelMult = 0.01_sp
+               EXIT
+           ENDIF
+       ENDDO
+       DO II = 1, SIZE(GRASS_ID)
+           IF (Inst%LANDTYPE(I,J,GRASS_ID(II) + 1 ) > 0.0_sp ) THEN
+               FuelMult = 0.05_sp
+               EXIT
+           ENDIF
+       ENDDO
+       DO II = 1, SIZE(FOREST_ID)
+           IF ( Inst%LANDTYPE(I,J,FOREST_ID(II) + 1 ) > 0.0_sp ) THEN
+               FuelMult = 2.0_sp
+               EXIT
+           ENDIF
+       ENDDO
+
+           
        ! Energy is Total fuel consumed [kg/m2] * burned area [km2] * Heat of combustion [J/kg] * Fire efficiency * area conversion
        ! [m2/km2]
-       Qo_ij = TFC_ij * GrowthArea_ij * H * Fire_Eff * 1.0e6_sp
-       save_Qo(I,J) = Qo_ij
+       QPlume_ij = TFC_ij * GrowthArea_ij * H * Fire_Eff * FuelMult * 1.0e6_sp
+       save_QPlume(I,J) = QPlume_ij
 
        ! Skip columns with no fire emissions or fire energy ??? WRONG?? FIX???
-       IF ( Qo_ij <= 0.0_sp .OR. CO_ij <= 0.0_sp .OR. BurnArea_ij < 0.0_sp ) CYCLE
+       IF ( QPlume_ij <= 0.0_sp .OR. CO_ij <= 0.0_sp .OR. BurnArea_ij < 0.0_sp ) CYCLE
 
        ! Build Pressure Array as midpoint of edge pressures
        ! Airdensity just from AIRDEN
@@ -331,7 +356,7 @@ CONTAINS
           Qatm = q * mplume
 
           ! Iterate dz
-          IF ( Qatm > Qo_ij ) THEN
+          IF ( Qatm > QPlume_ij ) THEN
              ddz = 0.5_sp * ddz
              dz  = dz - ddz
           ELSE
@@ -408,7 +433,7 @@ CONTAINS
 
     ! Write diagnosed plume top heights to the ZPlume_Calc diagnostic
     CALL Diagn_Update( HcoState, cName='ZPlume', Array2D=ZPlume2D, RC=RC )
-    CALL Diagn_Update( HcoState, cName='save_Qo', Array2D=save_Qo, RC=RC )
+    CALL Diagn_Update( HcoState, cName='save_QPlume', Array2D=save_QPlume, RC=RC )
     IF (RC /= HCO_SUCCESS ) THEN
        MSG = 'Diagn_Update error: plume rise'
        CALL HCO_ERROR( MSG, RC )
@@ -417,7 +442,7 @@ CONTAINS
 
     ! Cleanup
     DEALLOCATE( Ph, Zh, Rho, Weight, Emis3D, ZPlume2D )
-    DEALLOCATE( save_Qo )
+    DEALLOCATE( save_QPlume )
     Inst => NULL()
 
     CALL HCO_LEAVE( HcoState%Config%Err, RC )
@@ -467,6 +492,8 @@ CONTAINS
     TYPE(MyInst), POINTER :: Inst => NULL()
     INTEGER               :: ExtNr, N
     CHARACTER(LEN=255)    :: MSG, LOC
+    CHARACTER(LEN=12)     :: LandName
+    INTEGER               :: T 
 
     !=================================================================
     ! HCOX_Plume_Init begins here!
@@ -518,6 +545,17 @@ CONTAINS
        RETURN
     ENDIF
 
+    ALLOCATE ( Inst%LANDTYPE(HcoState%NX, HcoState%NY, 73) )
+    DO T = 0, 72
+        WRITE(LandName, '(A8,I2.2)') 'LANDTYPE', T
+        CALL HCO_EvalFld( HcoState, TRIM(LandName), Inst%LANDTYPE(:,:,T+1), RC)
+        IF ( RC /= HCO_SUCCESS ) THEN
+            WRITE(MSG,*) 'Cannot get land type field: ', TRIM(LandName)
+            CALL HCO_ERROR( MSG, RC, THISLOC=LOC )
+            RETURN
+        ENDIF
+    ENDDO
+
     ! Activate required meteorological fields in ExtState
     ExtState%TK%DoUse       = .TRUE.    ! 3D temperature [K]
     ExtState%AIRDEN%DoUse   = .TRUE.    ! 3D dry air density [kg/m3]
@@ -537,8 +575,13 @@ CONTAINS
                        AutoFill  = 0,                                        &
                        COL       = HcoState%Diagn%HcoDiagnIDDefault,         &
                        RC        = RC                                        )
+    IF ( RC /= HCO_SUCCESS ) THEN
+       CALL HCO_ERROR( 'Cannot create ZPlume diagnostic', RC, THISLOC=LOC )
+       RETURN
+    ENDIF
+
     CALL Diagn_Create( HcoState, &
-                       cName = 'save_Qo', &
+                       cName = 'save_QPlume', &
                        ExtNr = Inst%ExtNr, &
                        SpaceDim = 2, &
                        OutUnit = 'J', &
@@ -546,16 +589,8 @@ CONTAINS
                        AutoFill = 0, &
                        COL = HcoState%Diagn%HcoDiagnIDDefault, &
                        RC = RC )
-
-
     IF ( RC /= HCO_SUCCESS ) THEN
-       CALL HCO_ERROR( 'Cannot create ZPlume_Calc diagnostic', RC, THISLOC=LOC )
-       RETURN
-    ENDIF
-
-    ! Log extension activation
-    IF ( RC /= HCO_SUCCESS ) THEN
-       CALL HCO_ERROR( 'Cannot create ZPlume_Calc diagnostic', RC, THISLOC=LOC )
+       CALL HCO_ERROR( 'Cannot create save_QPlume diagnostic', RC, THISLOC=LOC )
        RETURN
     ENDIF
 
@@ -766,7 +801,7 @@ CONTAINS
        IF ( ASSOCIATED(Inst%Fire_GrowthArea)  ) DEALLOCATE(Inst%Fire_GrowthArea)
        IF ( ASSOCIATED(Inst%Fire_BurnAreaTot) ) DEALLOCATE(Inst%Fire_BurnAreaTot)
        IF ( ASSOCIATED(Inst%Fire_TFC)         ) DEALLOCATE(Inst%Fire_TFC)
-
+       IF ( ASSOCIATED(Inst%LANDTYPE)         ) DEALLOCATE(Inst%LANDTYPE)
        ! Pop instance off the linked list
        IF ( ASSOCIATED(PrevInst) ) THEN
           PrevInst%NextInst => Inst%NextInst
