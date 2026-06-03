@@ -91,7 +91,7 @@ MODULE HCOX_Plume_Mod
     REAL(hp), POINTER :: Fire_TFC(:,:)         => NULL()  ! Total fire consumed [kg/m2]
     REAL(hp), POINTER :: Fire_BurnAreaTot(:,:) => NULL()  ! burned area [km2]
     REAL(hp), POINTER :: LANDTYPE(:,:,:)       => NULL()  ! land type
-
+    LOGICAL           :: FirstRun = .TRUE.                ! Flag for reading landtype values
   END TYPE MyInst
 
   ! Pointer to all instances
@@ -139,6 +139,8 @@ CONTAINS
 !
     TYPE(MyInst), POINTER :: Inst => NULL()
     CHARACTER(LEN=255)    :: MSG, LOC                           ! hemco things
+    CHARACTER(LEN=12)     :: LandName                           ! CHAR to read Landtypes
+    INTEGER               :: T                                  ! INT to read Landtypes
     INTEGER               :: I, J, L, N                         ! loop variables
     INTEGER               :: NX, NY, NZ                         ! number of grid cells
     INTEGER               :: ref1, ref2, ref3, ref4, ref5       ! Levels correspoinding to lapse rates
@@ -222,6 +224,22 @@ CONTAINS
        CALL HCO_ERROR( 'Cannot get Fire_TFC field', RC, THISLOC=LOC )
        RETURN
     ENDIF
+
+    IF ( Inst%FirstRun ) THEN
+        ALLOCATE( Inst%LANDTYPE(NX, NY, 73) )
+        Inst%LANDTYPE = 0.0_hp
+        DO T = 0, 72
+            WRITE(LandName, '(A8,I2.2)') 'LANDTYPE', T
+            CALL HCO_EvalFld( HcoState, TRIM(LandName), Inst%LANDTYPE(:,:,T+1), RC )
+            IF ( RC /= HCO_SUCCESS ) THEN
+                    WRITE(MSG,*) 'Cannot get land type field: ', TRIM(LandName)
+                    CALL HCO_ERROR( MSG, RC, THISLOC=LOC )
+                    RETURN
+            ENDIF
+        ENDDO
+        Inst%FirstRun = .FALSE.
+    ENDIF
+
 
     ! Allocate arrays some arrays
     ALLOCATE( Ph(NZ), Zh(NZ), Rho(NZ), Weight(NZ), Emis3D(NX,NY,NZ), ZPlume2D(NX,NY) )
@@ -475,6 +493,7 @@ CONTAINS
     USE HCO_ExtList_Mod,  ONLY : GetExtOpt
     USE HCO_ExtList_Mod,  ONLY : GetExtSpcVal
     USE HCO_STATE_MOD,    ONLY : HCO_GetExtHcoID
+    USE HCO_Calc_Mod,     ONLY : HCO_EvalFld
 !
 ! !INPUT PARAMETERS:
 !
@@ -498,8 +517,6 @@ CONTAINS
     TYPE(MyInst), POINTER :: Inst => NULL()
     INTEGER               :: ExtNr, N
     CHARACTER(LEN=255)    :: MSG, LOC
-    CHARACTER(LEN=12)     :: LandName
-    INTEGER               :: T 
 
     !=================================================================
     ! HCOX_Plume_Init begins here!
@@ -550,17 +567,6 @@ CONTAINS
        CALL HCO_ERROR( 'ERROR 4', RC, THISLOC=LOC )
        RETURN
     ENDIF
-
-    ALLOCATE ( Inst%LANDTYPE(HcoState%NX, HcoState%NY, 73) )
-    DO T = 0, 72
-        WRITE(LandName, '(A8,I2.2)') 'LANDTYPE', T
-        CALL HCO_EvalFld( HcoState, TRIM(LandName), Inst%LANDTYPE(:,:,T+1), RC)
-        IF ( RC /= HCO_SUCCESS ) THEN
-            WRITE(MSG,*) 'Cannot get land type field: ', TRIM(LandName)
-            CALL HCO_ERROR( MSG, RC, THISLOC=LOC )
-            RETURN
-        ENDIF
-    ENDDO
 
     ! Activate required meteorological fields in ExtState
     ExtState%TK%DoUse       = .TRUE.    ! 3D temperature [K]
