@@ -59,9 +59,15 @@ MODULE HCOX_Plume_Mod
   REAL(sp), PARAMETER :: H         = 18000000_sp ! Heat of Combustion for dry wood [J/kg]
   REAL(sp), PARAMETER :: Fire_Eff  = 0.2_sp      ! Effieciency of fire
   INTEGER,  PARAMETER :: IMAX_CF   = 15000       ! max plume height and max iteration [m]
-  INTEGER,  PARAMETER :: FOREST_ID(20) = [3, 4, 5, 6, 21, 22, 23, 24, 25, 26, 27, 43, 54, 60, 61, 62, 77, 78, 95, 96]
-  INTEGER,  PARAMETER :: CROP_ID(11) = [30, 31, 35, 36, 37, 38, 39, 76, 92, 93, 94]
+  INTEGER,  PARAMETER :: FOREST_ID(18) = [3, 4, 5, 6, 21, 22, 23, 24, 25, 26, 27, 32, 33, 43, 54, 60, 61, 62]
+  INTEGER,  PARAMETER :: CROP_ID(8) = [29, 30, 31, 35, 36, 37, 38, 41]
   INTEGER,  PARAMETER :: GRASS_ID(10) = [2, 10, 41, 42, 46, 47, 51, 52, 59, 64]
+
+  ! These are the first ID sets I generated, but there are only 73 Ids in the ROOT directory, so i guess it is the 1992 version
+  ! instead of the 2001 one??
+  !INTEGER,  PARAMETER :: FOREST_ID(20) = [3, 4, 5, 6, 21, 22, 23, 24, 25, 26, 27, 43, 54, 60, 61, 62, 77, 78, 95, 96]
+  !INTEGER,  PARAMETER :: CROP_ID(11) = [30, 31, 35, 36, 37, 38, 39, 76, 92, 93, 94]
+  !INTEGER,  PARAMETER :: GRASS_ID(10) = [2, 10, 41, 42, 46, 47, 51, 52, 59, 64]
 !
 ! !MODULE VARIABLES:
 !
