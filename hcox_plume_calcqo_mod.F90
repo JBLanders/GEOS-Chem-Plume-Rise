@@ -517,6 +517,7 @@ CONTAINS
 !
     TYPE(MyInst), POINTER :: Inst => NULL()
     INTEGER               :: ExtNr, N
+    LOGICAL               :: Found
     CHARACTER(LEN=255)    :: MSG, LOC
 
     !=================================================================
@@ -557,7 +558,9 @@ CONTAINS
     CALL GetExtSpcVal( HcoState%Config, ExtNr, Inst%nSpc, &
                        Inst%SpcNames, 'Scaling', 1.0_sp, Inst%SpcScl, RC )
     IF ( RC /= HCO_SUCCESS ) THEN
-       CALL HCO_ERROR( 'ERROR 3', RC, THISLOC=LOC )
+G = 'Fire Effficiency set as: '
+634        WRITE(MSG,*) TRIM(Inst%Fire_Eff)
+635        CALL HCO_MSG( MSG, LUN=HcoState%Config%hcoLogLUN )
        RETURN
     ENDIF
 
@@ -576,7 +579,7 @@ CONTAINS
        CALL HCO_ERROR( 'Error reading Fire Efficiency option ', RC, THISLOC=LOC )
        RETURN
     ENDIF
-    IF ( . NOT. Found ) Inst%Fire_Eff = Fire_Eff_Def !If Fire_Eff not in HEMCO_Confic.rc set to default value
+    IF ( .NOT. Found ) Inst%Fire_Eff = Fire_Eff_Def !If Fire_Eff not in HEMCO_Confic.rc set to default value
 
     ! Activate required meteorological fields in ExtState
     ExtState%TK%DoUse       = .TRUE.    ! 3D temperature [K]
