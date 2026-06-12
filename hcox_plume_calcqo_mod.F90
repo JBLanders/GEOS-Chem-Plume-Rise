@@ -57,7 +57,7 @@ MODULE HCOX_Plume_Mod
   REAL(sp), PARAMETER :: CPD_CF    = 1004.0_sp   ! dry air specific heat [J/kg/K]
   REAL(sp), PARAMETER :: LD_CF     = -0.0098_sp  ! dry adiabatic lapse rate [K/m]
   REAL(sp), PARAMETER :: H         = 18000000_sp ! Heat of Combustion for dry wood [J/kg]
-  REAL(sp), PARAMETER :: Fire_Eff  = 0.2_sp      ! Effieciency of fire
+  REAL(sp), PARAMETER :: Fire_Eff_Def = 0.2_sp   ! Default effieciency of fire
   INTEGER,  PARAMETER :: IMAX_CF   = 15000       ! max plume height and max iteration [m]
   INTEGER,  PARAMETER :: FOREST_ID(18) = [3, 4, 5, 6, 21, 22, 23, 24, 25, 26, 27, 32, 33, 43, 54, 60, 61, 62]
   INTEGER,  PARAMETER :: CROP_ID(8) = [29, 30, 31, 35, 36, 37, 38, 41]
@@ -91,6 +91,7 @@ MODULE HCOX_Plume_Mod
     REAL(hp), POINTER :: Fire_TFC(:,:)         => NULL()  ! Total fire consumed [kg/m2]
     REAL(hp), POINTER :: Fire_BurnAreaTot(:,:) => NULL()  ! burned area [km2]
     REAL(hp), POINTER :: LANDTYPE(:,:,:)       => NULL()  ! land type
+    REAL(sp)          :: Fire_Eff = 0.2_sp                ! fire efficiency default value
     LOGICAL           :: FirstRun = .TRUE.                ! Flag for reading landtype values
   END TYPE MyInst
 
@@ -284,7 +285,7 @@ CONTAINS
            
        ! Energy is Total fuel consumed [kg/m2] * burned area [km2] * Heat of combustion [J/kg] * Fire efficiency * area conversion
        ! [m2/km2]
-       QPlume_ij = TFC_ij * GrowthArea_ij * H * Fire_Eff * FuelMult * 1.0e6_sp
+       QPlume_ij = TFC_ij * GrowthArea_ij * H * Inst%Fire_Eff * FuelMult * 1.0e6_sp
        save_QPlume(I,J) = QPlume_ij
 
        ! Skip columns with no fire emissions or fire energy ??? WRONG?? FIX???
@@ -568,6 +569,15 @@ CONTAINS
        RETURN
     ENDIF
 
+    ! Read Fire_Efficiency from HEMCO_Config (defaults to 0.2(
+    CALL GetExtOpt( HcoState%Config, ExtNr, 'Fire_Efficiency', &
+                    OptValSp=Inst%Fire_Eff, Found=Found, RC=RC )
+    IF ( RC /= HCO_SUCCESS ) THEN
+       CALL HCO_ERROR( 'Error reading Fire Efficiency option ', RC, THISLOC=LOC )
+       RETURN
+    ENDIF
+    IF ( . NOT. Found ) Inst%Fire_Eff = Fire_Eff_Def !If Fire_Eff not in HEMCO_Confic.rc set to default value
+
     ! Activate required meteorological fields in ExtState
     ExtState%TK%DoUse       = .TRUE.    ! 3D temperature [K]
     ExtState%AIRDEN%DoUse   = .TRUE.    ! 3D dry air density [kg/m3]
@@ -620,6 +630,8 @@ CONTAINS
           WRITE(MSG,*) TRIM(Inst%SpcNames(N)), ', ', Inst%SpcIDs(N), ', ', Inst%SpcScl(N)
           CALL HCO_MSG( MSG, LUN=HcoState%Config%hcoLogLUN )
        ENDDO
+       WRITE(MSG,'(A,F6.4)')  'Fire Efficiency set as: ', Inst%Fire_Eff
+       CALL HCO_MSG( MSG, LUN=HcoState%Config%hcoLogLUN )
     ENDIF
 
     ! Cleanup
