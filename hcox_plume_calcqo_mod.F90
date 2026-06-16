@@ -145,18 +145,16 @@ CONTAINS
     INTEGER               :: I, J, L, N                         ! loop variables
     INTEGER               :: NX, NY, NZ                         ! number of grid cells
     INTEGER               :: ref1, ref2, ref3, ref4, ref5       ! Levels correspoinding to lapse rates
-    INTEGER               :: ii, zplm_topL, zplm_nlay           ! plume height top and N layers
+    INTEGER               :: ii                                 ! plume height top and N layers
     REAL(sp)              :: FuelMult                           ! store values of land type coverage
     REAL(sp)              :: QPlume_ij, BurnArea_ij, CO_ij      ! fire values at ij
     REAL(sp)              :: GrowthArea_ij, TFC_ij              ! fire values at ij
     REAL(sp)              :: Le, Le1, Le2, Le3, Le4             ! different lapse rate values
     REAL(sp)              :: tsurf, ps, area                    ! met/area at each fire
     REAL(sp)              :: dz, ddz, q, Qatm, mplume, work     ! compute variables
-    REAL(sp)              :: weight_f_sum                       ! total weight to distribute emissions
     REAL(sp), ALLOCATABLE :: Ph(:)                              ! pressure profile [hPa]
     REAL(sp), ALLOCATABLE :: Zh(:)                              ! altitude profile [m]
     REAL(sp), ALLOCATABLE :: Rho(:)                             ! air density profile [kg/m3]
-    REAL(sp), ALLOCATABLE :: Weight(:)                          ! vertical distribution weights
     REAL(sp), ALLOCATABLE :: Emis3D(:,:,:)                      ! 3D CO emissions [kg/m2/s]
     REAL(sp), ALLOCATABLE :: ZPlume2D(:,:)                      ! save plume top height [m]
     REAL(sp), ALLOCATABLE :: save_QPlume(:,:), save_Landtype(:,:)  !diagn
@@ -406,41 +404,13 @@ CONTAINS
        IF ( dz < 0.0_sp ) dz = 0.0_sp
 
        ! Save plume top height for diagnostic output
-       ZPlume2D(I,J) = dz
+       ZPlume2D(I,J) = dz 
 
        ! Plume height calculation done
-
-       !-----------------------------------------------------------------
        ! Distribute Emissions
-       !-----------------------------------------------------------------
 
-       ! Find layer corresponding to plume top.
-       Weight    = 0.0_sp
-       zplm_topL = 1     ! default: surface only
-
-       DO L = 1, NZ
-          IF ( Zh(L) <= dz ) THEN
-             zplm_topL = L
-          ELSE
-             EXIT
-          ENDIF
-       ENDDO
-       zplm_nlay = zplm_topL   ! number of layers in plume
-
-       ! Total weight is sum of air density from surf to plume top
-       weight_f_sum = SUM( Rho(1:zplm_topL) )
-       DO L = 1, zplm_topL
-          IF ( weight_f_sum > 0.0_sp ) THEN
-             Weight(L) = Rho(L) / weight_f_sum !Weight fraction is air density at lev / tot dens
-          ELSE
-             Weight(L) = 1.0_sp / REAL( zplm_nlay, sp )  ! uniform fallback
-          ENDIF
-       ENDDO
-
-       ! Distribute CO emissions vertically: Emis3D = CO_sfc * weight(L)
-       DO L = 1, zplm_topL
-          Emis3D(I,J,L) = CO_ij * Weight(L)
-       ENDDO
+       CALL DistributeEmissionsDensity( dz, Zh, Rho, CO_ij, EmisCol )
+       Emis3D(I,J,:) = EmisCol
 
     ENDDO  ! I
     ENDDO  ! J
@@ -662,6 +632,90 @@ CONTAINS
 !------------------------------------------------------------------------------
 !BOP
 !
+! !ROUTINE: DistributeEmissionsDensity
+!
+! !DESCRIPTION: Calculates the vertical column of CO emissions to add to Hco
+! flux based on the density of each level:
+! CO_ij * Rho(L)/Total_Rho
+!\\
+!\\
+! !INTERFACE:
+!
+  SUBROUTINE DistributeEmissionsDensity( dz, Zh, Rho, CO_ij, EmisCol )
+!
+! !USES:
+!
+!
+! !INPUT PARAMETERS:
+!
+    REAL(sp),                   INTENT(IN)          :: dz, CO_ij
+    REAL(sp),                   INTENT(IN)          :: Zh(:), Rho(:)
+!
+! !INPUT/OUTPUT PARAMETERS: 
+
+!
+!
+! !OUTPUT PARAMETERS:
+!
+    REAL(sp),                   INTENT(OUT)         :: EmisCol(:)
+
+! !REVISION HISTORY:
+!  16 Jun 2026 - J. Landers    - Initial Version
+!  See https://github.com/JBLanders/GEOS-Chem-Plume-Rise for version history
+!EOP
+!------------------------------------------------------------------------------
+!BOC
+!
+! !LOCAL VARIABLES:!
+!
+    INTEGER                  :: L, NZ
+    INTEGER                  :: zplm_nlay,  zplm_topL
+    REAL(sp)                 :: weight_f_sum
+    REAL(sp), ALLOCATABLE    :: Weight(:)
+
+    !========================================================================
+    ! DistributeEmissionsDensity begins here!
+    !========================================================================
+    NZ = SIZE(Zh)
+    ALLOCATE( Weight(NZ) )
+
+    ! Find layer corresponding to plume top.
+    Weight    = 0.0_sp
+    EmisCol   = 0.0_sp
+    zplm_topL = 1     ! default: surface only
+
+    DO L = 1, NZ
+       IF ( Zh(L) <= dz ) THEN
+          zplm_topL = L
+       ELSE
+          EXIT
+       ENDIF
+    ENDDO
+    zplm_nlay = zplm_topL   ! number of layers in plume
+
+    ! Total weight is sum of air density from surf to plume top
+    weight_f_sum = SUM( Rho(1:zplm_topL) )
+    DO L = 1, zplm_topL
+       IF ( weight_f_sum > 0.0_sp ) THEN
+          Weight(L) = Rho(L) / weight_f_sum !Weight fraction is air density at lev / tot dens
+       ELSE
+          Weight(L) = 1.0_sp / REAL( zplm_nlay, sp )  ! uniform fallback
+       ENDIF
+    ENDDO
+
+    ! Distribute CO emissions vertically: Emis3D = CO_sfc * weight(L)
+    DO L = 1, zplm_topL
+       EmisCol(L) = CO_ij * Weight(L)
+    ENDDO
+
+ END SUBROUTINE DistributeEmissionsDensity
+!EOC
+
+!------------------------------------------------------------------------------
+!                   Harmonized Emissions Component (HEMCO)                    !
+!------------------------------------------------------------------------------
+!BOP
+!
 ! !IROUTINE: HCOX_Plume_Final
 !
 ! !DESCRIPTION: Finalizes the thermodynamic plume rise extension and removes
@@ -687,6 +741,8 @@ CONTAINS
 
   END SUBROUTINE HCOX_Plume_Final
 !EOC
+
+
 !------------------------------------------------------------------------------
 !                   Harmonized Emissions Component (HEMCO)                    !
 !------------------------------------------------------------------------------
