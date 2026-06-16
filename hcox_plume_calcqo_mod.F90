@@ -159,7 +159,7 @@ CONTAINS
     REAL(sp), ALLOCATABLE :: Weight(:)                          ! vertical distribution weights
     REAL(sp), ALLOCATABLE :: Emis3D(:,:,:)                      ! 3D CO emissions [kg/m2/s]
     REAL(sp), ALLOCATABLE :: ZPlume2D(:,:)                      ! save plume top height [m]
-    REAL(sp), ALLOCATABLE :: save_QPlume(:,:)  !diagn
+    REAL(sp), ALLOCATABLE :: save_QPlume(:,:), save_Landtype(:,:)  !diagn
 
     !=================================================================
     ! HCOX_Plume_Run begins here!
@@ -244,7 +244,7 @@ CONTAINS
 
     ! Allocate arrays some arrays
     ALLOCATE( Ph(NZ), Zh(NZ), Rho(NZ), Weight(NZ), Emis3D(NX,NY,NZ), ZPlume2D(NX,NY) )
-    ALLOCATE( save_QPlume(NX,NY) )
+    ALLOCATE( save_QPlume(NX,NY), save_Landtype(NX,NY) )
     Emis3D   = 0.0_sp
     ZPlume2D = 0.0_sp
 
@@ -281,7 +281,7 @@ CONTAINS
                EXIT
            ENDIF
        ENDDO
-
+       save_Landtype(I,J) = FuelMult
            
        ! Energy is Total fuel consumed [kg/m2] * burned area [km2] * Heat of combustion [J/kg] * Fire efficiency * area conversion
        ! [m2/km2]
@@ -459,6 +459,7 @@ CONTAINS
     ! Write diagnosed plume top heights to the ZPlume_Calc diagnostic
     CALL Diagn_Update( HcoState, cName='ZPlume', Array2D=ZPlume2D, RC=RC )
     CALL Diagn_Update( HcoState, cName='save_QPlume', Array2D=save_QPlume, RC=RC )
+    CALL Diagn_Update( HcoState, cName='save_Landtype', Array2D=save_Landtype, RC=RC )
     IF (RC /= HCO_SUCCESS ) THEN
        MSG = 'Diagn_Update error: plume rise'
        CALL HCO_ERROR( MSG, RC )
@@ -467,7 +468,7 @@ CONTAINS
 
     ! Cleanup
     DEALLOCATE( Ph, Zh, Rho, Weight, Emis3D, ZPlume2D )
-    DEALLOCATE( save_QPlume )
+    DEALLOCATE( save_QPlume, save_Landtype )
     Inst => NULL()
 
     CALL HCO_LEAVE( HcoState%Config%Err, RC )
@@ -558,10 +559,9 @@ CONTAINS
     CALL GetExtSpcVal( HcoState%Config, ExtNr, Inst%nSpc, &
                        Inst%SpcNames, 'Scaling', 1.0_sp, Inst%SpcScl, RC )
     IF ( RC /= HCO_SUCCESS ) THEN
-G = 'Fire Effficiency set as: '
-634        WRITE(MSG,*) TRIM(Inst%Fire_Eff)
-635        CALL HCO_MSG( MSG, LUN=HcoState%Config%hcoLogLUN )
-       RETURN
+        WRITE(MSG, '(A,F6.4)') 'Fire Efficiency set as: ', Inst%Fire_Eff 
+        CALL HCO_MSG( MSG, LUN=HcoState%Config%hcoLogLUN )
+        RETURN
     ENDIF
 
     ! Per-species scale field names (optional)
@@ -616,6 +616,20 @@ G = 'Fire Effficiency set as: '
                        RC = RC )
     IF ( RC /= HCO_SUCCESS ) THEN
        CALL HCO_ERROR( 'Cannot create save_QPlume diagnostic', RC, THISLOC=LOC )
+       RETURN
+    ENDIF
+
+    CALL Diagn_Create( HcoState, &
+                       cName = 'save_Landtype', &
+                       ExtNr = Inst%ExtNr, &
+                       SpaceDim = 2, &
+                       OutUnit = 'm', &
+                       OutOper = 'Mean', &
+                       AutoFill = 0, &
+                       COL = HcoState%Diagn%HcoDiagnIDDefault, &
+                       RC = RC )
+    IF ( RC /= HCO_SUCCESS ) THEN
+       CALL HCO_ERROR( 'Cannot create save_Landtype diagnostic', RC, THISLOC=LOC )
        RETURN
     ENDIF
 
