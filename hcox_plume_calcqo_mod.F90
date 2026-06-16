@@ -155,6 +155,7 @@ CONTAINS
     REAL(sp), ALLOCATABLE :: Ph(:)                              ! pressure profile [hPa]
     REAL(sp), ALLOCATABLE :: Zh(:)                              ! altitude profile [m]
     REAL(sp), ALLOCATABLE :: Rho(:)                             ! air density profile [kg/m3]
+    REAL(sp), ALLOCATABLE :: EmisCol(:)                         ! Single column of emissions
     REAL(sp), ALLOCATABLE :: Emis3D(:,:,:)                      ! 3D CO emissions [kg/m2/s]
     REAL(sp), ALLOCATABLE :: ZPlume2D(:,:)                      ! save plume top height [m]
     REAL(sp), ALLOCATABLE :: save_QPlume(:,:), save_Landtype(:,:)  !diagn
@@ -241,7 +242,7 @@ CONTAINS
 
 
     ! Allocate arrays some arrays
-    ALLOCATE( Ph(NZ), Zh(NZ), Rho(NZ), Weight(NZ), Emis3D(NX,NY,NZ), ZPlume2D(NX,NY) )
+    ALLOCATE( Ph(NZ), Zh(NZ), Rho(NZ), EmisCol(NZ), Emis3D(NX,NY,NZ), ZPlume2D(NX,NY) )
     ALLOCATE( save_QPlume(NX,NY), save_Landtype(NX,NY) )
     Emis3D   = 0.0_sp
     ZPlume2D = 0.0_sp
@@ -437,7 +438,7 @@ CONTAINS
     ENDIF
 
     ! Cleanup
-    DEALLOCATE( Ph, Zh, Rho, Weight, Emis3D, ZPlume2D )
+    DEALLOCATE( Ph, Zh, Rho, EmisCol, Emis3D, ZPlume2D )
     DEALLOCATE( save_QPlume, save_Landtype )
     Inst => NULL()
 
@@ -707,6 +708,8 @@ CONTAINS
     DO L = 1, zplm_topL
        EmisCol(L) = CO_ij * Weight(L)
     ENDDO
+
+    DEALLOCATE( Weight )
 
  END SUBROUTINE DistributeEmissionsDensity
 !EOC
