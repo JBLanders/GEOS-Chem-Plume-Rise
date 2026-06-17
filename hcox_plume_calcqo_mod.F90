@@ -150,7 +150,7 @@ CONTAINS
     CHARACTER(LEN=255)    :: MSG, LOC                              ! hemco things
     CHARACTER(LEN=12)     :: LandName                              ! CHAR to read Landtypes
     INTEGER               :: T                                     ! INT to read Landtypes
-    INTEGER               :: I, J, L, N                            ! loop variables
+    INTEGER               :: I, J, L, N, JJ                        ! loop variables
     INTEGER               :: NX, NY, NZ                            ! number of grid cells
     INTEGER               :: ref1, ref2, ref3, ref4, ref5          ! Levels correspoinding to lapse rates
     INTEGER               :: ii                                    ! plume height top and N layers
@@ -505,7 +505,7 @@ CONTAINS
     INTEGER               :: ExtNr, N
     LOGICAL               :: Found
     CHARACTER(LEN=255)    :: MSG, LOC
-    CHARACTER(LEN=255)    :: DistMethodStr ! Holds DistMethod from HEMCO_Config.rc
+    CHARACTER(LEN=255)    :: DistMethodStr   ! Holds DistMethod from HEMCO_Config.rc
 
     !=================================================================
     ! HCOX_Plume_Init begins here!
@@ -569,7 +569,7 @@ CONTAINS
 
     ! Read Distribution_Method from HEMCO_Config, to set CO distribution method
     CALL GetExtOpt( HcoState%Config, ExtNr, 'Distribution_Method', &
-                     OptValStr=DistMethodStr, Found=Found, RC=RC )
+                     OptValChar=DistMethodStr, Found=Found, RC=RC )
     IF ( RC /= HCO_SUCCESS ) THEN
        CALL HCO_ERROR( 'Error reading Distribution Method option', RC, THISLOC=LOC )
        RETURN
@@ -577,6 +577,7 @@ CONTAINS
 
     IF ( .NOT. FOUND ) THEN
         Inst%DistMethod = 1 ! Default to uniform distribution, if no option specified
+        DistMethodStr = 'Uniform'
     ELSE
         ! Set Inst%DistMethod from DistMethodStr
         IF ( TRIM(DistMethodStr) == 'Uniform' ) THEN
@@ -825,7 +826,6 @@ CONTAINS
 ! !LOCAL VARIABLES:!
 !
     INTEGER                  :: L, NZ, zplm_topL
-    REAL(sp)                 :: weight_f_sum
 
     !========================================================================
     ! DistributeEmissionsUniform begins here!
@@ -918,6 +918,9 @@ CONTAINS
     ! Calculate Gaussian parameters
     mu    = dz / 2.0_sp
     sigma = dz / 4.0_sp
+   
+    ! Guard against small dz causing divide by 0 error 
+    IF (sigma <= 0.0_sp) sigma = 1.0_sp
 
     DO L = 1, zplm_topL
         Weight(L) = EXP( -0.5_sp * ( (Zh(L) - mu) / sigma ) **2 )
