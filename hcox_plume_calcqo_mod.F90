@@ -42,6 +42,12 @@ MODULE HCOX_Plume_Mod
   PUBLIC :: HCOX_Plume_Init
   PUBLIC :: HCOX_Plume_Final
 !
+! !PRIVATE MEMBER FUNCTIONS:
+!
+  PRIVATE :: DistributeEmissionsDensity
+  PRIVATE :: DistributeEmissionsUniform
+  PRIVATE :: DistributeEmissionsGaussian
+!
 ! !REVISION HISTORY:
 !  10 Feb 2016 - C. Keller   - Initial version
 !  See https://github.com/geoschem/hemco for complete history
@@ -92,7 +98,9 @@ MODULE HCOX_Plume_Mod
     REAL(hp), POINTER :: Fire_BurnAreaTot(:,:) => NULL()  ! burned area [km2]
     REAL(hp), POINTER :: LANDTYPE(:,:,:)       => NULL()  ! land type
     REAL(sp)          :: Fire_Eff = 0.2_sp                ! fire efficiency default value
+    INTEGER           :: DistMethod = 1
     LOGICAL           :: FirstRun = .TRUE.                ! Flag for reading landtype values
+    
   END TYPE MyInst
 
   ! Pointer to all instances
@@ -139,25 +147,25 @@ CONTAINS
 ! !LOCAL VARIABLES:
 !
     TYPE(MyInst), POINTER :: Inst => NULL()
-    CHARACTER(LEN=255)    :: MSG, LOC                           ! hemco things
-    CHARACTER(LEN=12)     :: LandName                           ! CHAR to read Landtypes
-    INTEGER               :: T                                  ! INT to read Landtypes
-    INTEGER               :: I, J, L, N                         ! loop variables
-    INTEGER               :: NX, NY, NZ                         ! number of grid cells
-    INTEGER               :: ref1, ref2, ref3, ref4, ref5       ! Levels correspoinding to lapse rates
-    INTEGER               :: ii                                 ! plume height top and N layers
-    REAL(sp)              :: FuelMult                           ! store values of land type coverage
-    REAL(sp)              :: QPlume_ij, BurnArea_ij, CO_ij      ! fire values at ij
-    REAL(sp)              :: GrowthArea_ij, TFC_ij              ! fire values at ij
-    REAL(sp)              :: Le, Le1, Le2, Le3, Le4             ! different lapse rate values
-    REAL(sp)              :: tsurf, ps, area                    ! met/area at each fire
-    REAL(sp)              :: dz, ddz, q, Qatm, mplume, work     ! compute variables
-    REAL(sp), ALLOCATABLE :: Ph(:)                              ! pressure profile [hPa]
-    REAL(sp), ALLOCATABLE :: Zh(:)                              ! altitude profile [m]
-    REAL(sp), ALLOCATABLE :: Rho(:)                             ! air density profile [kg/m3]
-    REAL(sp), ALLOCATABLE :: EmisCol(:)                         ! Single column of emissions
-    REAL(sp), ALLOCATABLE :: Emis3D(:,:,:)                      ! 3D CO emissions [kg/m2/s]
-    REAL(sp), ALLOCATABLE :: ZPlume2D(:,:)                      ! save plume top height [m]
+    CHARACTER(LEN=255)    :: MSG, LOC                              ! hemco things
+    CHARACTER(LEN=12)     :: LandName                              ! CHAR to read Landtypes
+    INTEGER               :: T                                     ! INT to read Landtypes
+    INTEGER               :: I, J, L, N                            ! loop variables
+    INTEGER               :: NX, NY, NZ                            ! number of grid cells
+    INTEGER               :: ref1, ref2, ref3, ref4, ref5          ! Levels correspoinding to lapse rates
+    INTEGER               :: ii                                    ! plume height top and N layers
+    REAL(sp)              :: FuelMult                              ! store values of land type coverage
+    REAL(sp)              :: QPlume_ij, BurnArea_ij, CO_ij         ! fire values at ij
+    REAL(sp)              :: GrowthArea_ij, TFC_ij                 ! fire values at ij
+    REAL(sp)              :: Le, Le1, Le2, Le3, Le4                ! different lapse rate values
+    REAL(sp)              :: tsurf, ps, area                       ! met/area at each fire
+    REAL(sp)              :: dz, ddz, q, Qatm, mplume, work        ! compute variables
+    REAL(sp), ALLOCATABLE :: Ph(:)                                 ! pressure profile [hPa]
+    REAL(sp), ALLOCATABLE :: Zh(:)                                 ! altitude profile [m]
+    REAL(sp), ALLOCATABLE :: Rho(:)                                ! air density profile [kg/m3]
+    REAL(sp), ALLOCATABLE :: EmisCol(:)                            ! Single column of emissions
+    REAL(sp), ALLOCATABLE :: Emis3D(:,:,:)                         ! 3D CO emissions [kg/m2/s]
+    REAL(sp), ALLOCATABLE :: ZPlume2D(:,:)                         ! save plume top height [m]
     REAL(sp), ALLOCATABLE :: save_QPlume(:,:), save_Landtype(:,:)  !diagn
 
     !=================================================================
@@ -262,8 +270,8 @@ CONTAINS
        CO_ij   = REAL( Inst%Fire_CO(I,J),           sp )  ! CO flux [kg/m2/s]
 
        FuelMult = 1.0_sp
-       DO II = 1, SIZE(CROP_ID)
-           IF (Inst%LANDTYPE(I,J, CROP_ID(II) + 1 ) > 0.0_sp ) THEN
+       DO JJ  = 1, SIZE(CROP_ID)
+           IF (Inst%LANDTYPE(I,J, CROP_ID(JJ) + 1 ) > 0.0_sp ) THEN
                FuelMult = 0.01_sp
                EXIT
            ENDIF
@@ -288,7 +296,7 @@ CONTAINS
        save_QPlume(I,J) = QPlume_ij
 
        ! Skip columns with no fire emissions or fire energy ??? WRONG?? FIX???
-       IF ( QPlume_ij <= 0.0_sp .OR. CO_ij <= 0.0_sp .OR. BurnArea_ij < 0.0_sp ) CYCLE
+       IF ( QPlume_ij <= 0.0_sp .OR. CO_ij <= 0.0_sp .OR. BurnArea_ij <= 0.0_sp ) CYCLE
 
        ! Build Pressure Array as midpoint of edge pressures
        ! Airdensity just from AIRDEN
@@ -409,8 +417,14 @@ CONTAINS
 
        ! Plume height calculation done
        ! Distribute Emissions
+       IF ( Inst%DistMethod == 1 ) THEN
+           CALL DistributeEmissionsUniform( dz, Zh, CO_ij, EmisCol)
+       ELSE IF (Inst%DistMethod == 2 ) THEN
+           CALL DistributeEmissionsDensity( dz, Zh, Rho, CO_ij, EmisCol )
+       ELSE IF (Inst%DistMethod == 3 ) THEN
+           CALL DistributeEmissionsGaussian(dz, Zh, CO_ij, EmisCol )
+       ENDIF
 
-       CALL DistributeEmissionsDensity( dz, Zh, Rho, CO_ij, EmisCol )
        Emis3D(I,J,:) = EmisCol
 
     ENDDO  ! I
@@ -491,6 +505,7 @@ CONTAINS
     INTEGER               :: ExtNr, N
     LOGICAL               :: Found
     CHARACTER(LEN=255)    :: MSG, LOC
+    CHARACTER(LEN=255)    :: DistMethodStr ! Holds DistMethod from HEMCO_Config.rc
 
     !=================================================================
     ! HCOX_Plume_Init begins here!
@@ -552,6 +567,30 @@ CONTAINS
     ENDIF
     IF ( .NOT. Found ) Inst%Fire_Eff = Fire_Eff_Def !If Fire_Eff not in HEMCO_Confic.rc set to default value
 
+    ! Read Distribution_Method from HEMCO_Config, to set CO distribution method
+    CALL GetExtOpt( HcoState%Config, ExtNr, 'Distribution_Method', &
+                     OptValStr=DistMethodStr, Found=Found, RC=RC )
+    IF ( RC /= HCO_SUCCESS ) THEN
+       CALL HCO_ERROR( 'Error reading Distribution Method option', RC, THISLOC=LOC )
+       RETURN
+    ENDIF
+
+    IF ( .NOT. FOUND ) THEN
+        Inst%DistMethod = 1 ! Default to uniform distribution, if no option specified
+    ELSE
+        ! Set Inst%DistMethod from DistMethodStr
+        IF ( TRIM(DistMethodStr) == 'Uniform' ) THEN
+            Inst%DistMethod = 1
+        ELSE IF ( TRIM(DistMethodStr) == 'Density' ) THEN
+            Inst%DistMethod = 2
+        ELSE IF ( TRIM(DistMethodStr) == 'Gaussian' ) THEN
+            Inst%DistMethod = 3
+        ELSE
+           CALL HCO_ERROR('Unknown Distribution_Method: '//TRIM(DistMethodStr), RC )
+           RETURN
+        ENDIF
+    ENDIF
+    
     ! Activate required meteorological fields in ExtState
     ExtState%TK%DoUse       = .TRUE.    ! 3D temperature [K]
     ExtState%AIRDEN%DoUse   = .TRUE.    ! 3D dry air density [kg/m3]
@@ -620,6 +659,8 @@ CONTAINS
        ENDDO
        WRITE(MSG,'(A,F6.4)')  'Fire Efficiency set as: ', Inst%Fire_Eff
        CALL HCO_MSG( MSG, LUN=HcoState%Config%hcoLogLUN )
+       WRITE(MSG, '(A,A)' ) 'Distribution Method set to: ', TRIM(DistMethodStr)
+       CALL HCO_MSG( MSG, LUN=HcoState%Config%hcoLogLUN )
     ENDIF
 
     ! Cleanup
@@ -627,6 +668,36 @@ CONTAINS
     CALL HCO_LEAVE( HcoState%Config%Err, RC )
 
   END SUBROUTINE HCOX_Plume_Init
+!EOC
+!------------------------------------------------------------------------------
+!                   Harmonized Emissions Component (HEMCO)                    !
+!------------------------------------------------------------------------------
+!BOP
+!
+! !IROUTINE: HCOX_Plume_Final
+!
+! !DESCRIPTION: Finalizes the thermodynamic plume rise extension and removes
+! the instance from the instance list.
+!\\
+!\\
+! !INTERFACE:
+!
+  SUBROUTINE HCOX_Plume_Final( ExtState )
+!
+! !INPUT PARAMETERS:
+!
+    TYPE(Ext_State), POINTER :: ExtState
+!
+! !REVISION HISTORY:
+!EOP
+!------------------------------------------------------------------------------
+!BOC
+    !=================================================================
+    ! HCOX_Plume_Final begins here!
+    !=================================================================
+    CALL InstRemove( ExtState%Plume )
+
+  END SUBROUTINE HCOX_Plume_Final
 !EOC
 !------------------------------------------------------------------------------
 !                   Harmonized Emissions Component (HEMCO)                    !
@@ -680,11 +751,11 @@ CONTAINS
     NZ = SIZE(Zh)
     ALLOCATE( Weight(NZ) )
 
-    ! Find layer corresponding to plume top.
     Weight    = 0.0_sp
     EmisCol   = 0.0_sp
     zplm_topL = 1     ! default: surface only
 
+    ! Find level corresponding to plume top
     DO L = 1, NZ
        IF ( Zh(L) <= dz ) THEN
           zplm_topL = L
@@ -713,39 +784,155 @@ CONTAINS
 
  END SUBROUTINE DistributeEmissionsDensity
 !EOC
-
 !------------------------------------------------------------------------------
 !                   Harmonized Emissions Component (HEMCO)                    !
 !------------------------------------------------------------------------------
 !BOP
 !
-! !IROUTINE: HCOX_Plume_Final
+! !ROUTINE: DistributeEmissionsUniform
 !
-! !DESCRIPTION: Finalizes the thermodynamic plume rise extension and removes
-! the instance from the instance list.
+! !DESCRIPTION: Calculates the vertical column of CO emissions to add to Hco
+! flux based on a uniform distribution. This should be identical to using 
+! Zplume scale factor from the CFFEPS files.
 !\\
 !\\
 ! !INTERFACE:
 !
-  SUBROUTINE HCOX_Plume_Final( ExtState )
+  SUBROUTINE DistributeEmissionsUniform( dz, Zh, CO_ij, EmisCol )
+!
+! !USES:
+!
 !
 ! !INPUT PARAMETERS:
 !
-    TYPE(Ext_State), POINTER :: ExtState
+    REAL(sp),                   INTENT(IN)          :: dz, CO_ij
+    REAL(sp),                   INTENT(IN)          :: Zh(:)
+!
+! !INPUT/OUTPUT PARAMETERS: 
+!
+!
+! !OUTPUT PARAMETERS:
+!
+    REAL(sp),                   INTENT(OUT)         :: EmisCol(:)
 !
 ! !REVISION HISTORY:
+!  16 Jun 2026 - J. Landers    - Initial Version
+!  See https://github.com/JBLanders/GEOS-Chem-Plume-Rise for version history
 !EOP
 !------------------------------------------------------------------------------
 !BOC
-    !=================================================================
-    ! HCOX_Plume_Final begins here!
-    !=================================================================
-    CALL InstRemove( ExtState%Plume )
+!
+! !LOCAL VARIABLES:!
+!
+    INTEGER                  :: L, NZ, zplm_topL
+    REAL(sp)                 :: weight_f_sum
 
-  END SUBROUTINE HCOX_Plume_Final
+    !========================================================================
+    ! DistributeEmissionsUniform begins here!
+    !========================================================================
+    NZ = SIZE(Zh)
+    EmisCol   = 0.0_sp
+    zplm_topL = 1     ! default: surface only
+
+    ! Find level corresponding to plume top
+    DO L = 1, NZ
+       IF ( Zh(L) <= dz ) THEN
+          zplm_topL = L
+       ELSE
+          EXIT
+       ENDIF
+    ENDDO
+
+   !Calculate Column of Species
+   DO L = 1, zplm_topL
+       EmisCol(L) = CO_ij / REAL(zplm_topL, sp)
+   ENDDO
+
+ END SUBROUTINE DistributeEmissionsUniform
 !EOC
+!------------------------------------------------------------------------------
+!                   Harmonized Emissions Component (HEMCO)                    !
+!------------------------------------------------------------------------------
+!BOP
+!
+! !ROUTINE: DistributeEmissionsGaussian
+!
+! !DESCRIPTION: Calculates the vertical column of CO emissions to add to Hco
+! flux based on a Gaussian distribution. The plume is centred at the midpoint
+! with the plume top and bottom at the 2-sigma point
+!\\
+!\\
+! !INTERFACE:
+!
+  SUBROUTINE DistributeEmissionsGaussian( dz, Zh, CO_ij, EmisCol )
+!
+! !USES:
+!
+!
+! !INPUT PARAMETERS:
+!
+    REAL(sp),                   INTENT(IN)          :: dz, CO_ij
+    REAL(sp),                   INTENT(IN)          :: Zh(:)
+!
+! !INPUT/OUTPUT PARAMETERS: 
+!
+!
+! !OUTPUT PARAMETERS:
+!
+    REAL(sp),                   INTENT(OUT)         :: EmisCol(:)
+!
+! !REVISION HISTORY:
+!  16 Jun 2026 - J. Landers    - Initial Version
+!  See https://github.com/JBLanders/GEOS-Chem-Plume-Rise for version history
+!EOP
+!------------------------------------------------------------------------------
+!BOC
+!
+! !LOCAL VARIABLES:!
+!
+    INTEGER                  :: L, NZ, zplm_topL
+    REAL(sp)                 :: mu, sigma
+    REAL(sp)                 :: weight_f_sum
+    REAL(sp), ALLOCATABLE    :: Weight(:)
 
+    !========================================================================
+    ! DistributeEmissionsGaussian begins here!
+    !========================================================================
+    NZ = SIZE(Zh)
+    ALLOCATE (Weight(NZ) )
 
+    EmisCol      = 0.0_sp
+    Weight       = 0.0_sp
+    weight_f_sum = 0.0_sp
+    zplm_topL = 1     ! default: surface only
+
+    ! Find level corresponding to plume top
+    DO L = 1, NZ
+       IF ( Zh(L) <= dz ) THEN
+          zplm_topL = L
+       ELSE
+          EXIT
+       ENDIF
+    ENDDO
+
+    ! Calculate Gaussian parameters
+    mu    = dz / 2.0_sp
+    sigma = dz / 4.0_sp
+
+    DO L = 1, zplm_topL
+        Weight(L) = EXP( -0.5_sp * ( (Zh(L) - mu) / sigma ) **2 )
+    ENDDO
+
+    weight_f_sum = SUM( Weight(1:zplm_topL) )
+
+    DO L = 1, zplm_topL
+        EmisCol(L) = CO_ij * Weight(L) / weight_f_sum
+    ENDDO
+
+    DEALLOCATE( Weight )
+
+ END SUBROUTINE DistributeEmissionsGaussian
+!EOC
 !------------------------------------------------------------------------------
 !                   Harmonized Emissions Component (HEMCO)                    !
 !------------------------------------------------------------------------------
