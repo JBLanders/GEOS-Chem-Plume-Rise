@@ -16,6 +16,14 @@
 !   Fire_TFC         - 2D fire energy      [kg/m2]    (NetCDF var: ??)
 !   Fire_BurnAreaTot - 2D burned area      [km2]      (NetCDF var: BurnAreaTot)
 !   Fire_GrowthArea  - 2D new area burned  [km2]      (NetCDF var: ???) 
+! Configure in Base Emission section under (((Plume  )))Plume
+!
+! Required HEMCO_Config.rc options:
+!   Fire_Efficiency  - decimal amount of burning fire energy that goes into the plume
+!   Distribution_Method - Changes how the CO emissions are distributed in the column
+!        --> Uniform    - DEFAULT, Distribites emissions uniformly
+!        --> Density    - Distributes emissions weighted by density in the column
+!        --> Gaussian   - Gaussian distribution with the max in the middle of the column
 ! 
 !  Other things that have been changed:
 !       - added init run and final to hcox_driver_mod.F90
@@ -347,7 +355,7 @@ CONTAINS
            / ( Zh(ref3) + 0.5*REAL(HcoState%Grid%BXHEIGHT_M%Val(I,J,ref3), sp ) )   ! surface to 700 hPa
        Le3 = ( REAL(ExtState%TK%Arr%Val(I,J,ref4), sp)           &
              - REAL(ExtState%T2M%Arr%Val(I,J), sp) )          &
-           / ( Zh(ref4) + 0.5*REAL(HcoState%Grid%BXHEIGHT_M%Val(I,J,ref4), sp) )  
+           / ( Zh(ref4) + 0.5*REAL(HcoState%Grid%BXHEIGHT_M%Val(I,J,ref4), sp) )  a
        Le4 = ( REAL(ExtState%TK%Arr%Val(I,J,ref5), sp)           &
              - REAL(ExtState%T2M%Arr%Val(I,J), sp) )          &
            / ( Zh(ref5) + 0.5*REAL(HcoState%Grid%BXHEIGHT_M%Val(I,J,ref5), sp) )   ! surface to 200 hPa
