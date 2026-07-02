@@ -156,13 +156,14 @@ CONTAINS
 !
     TYPE(MyInst), POINTER :: Inst => NULL()
     CHARACTER(LEN=255)    :: MSG, LOC                              ! hemco things
-    CHARACTER(LEN=12)     :: LandName                              ! CHAR to read Landtypes
-    INTEGER               :: T                                     ! INT to read Landtypes
-    INTEGER               :: I, J, L, N, JJ                        ! loop variables
+    !CHARACTER(LEN=12)     :: LandName                              ! CHAR to read Landtypes
+    !INTEGER               :: T                                     ! INT to read Landtypes
+    INTEGER               :: I, J, L, N,                           ! loop variables
+    !INTEGER               :: JJ
     INTEGER               :: NX, NY, NZ                            ! number of grid cells
     INTEGER               :: ref1, ref2, ref3, ref4, ref5          ! Levels correspoinding to lapse rates
     INTEGER               :: ii                                    ! plume height top and N layers
-    REAL(sp)              :: FuelMult                              ! store values of land type coverage
+    !REAL(sp)              :: FuelMult                              ! store values of land type coverage
     REAL(sp)              :: QPlume_ij, Qt, BurnArea_ij, CO_ij    ! fire values at ij
     REAL(sp)              :: GrowthArea_ij, TFC_ij                 ! fire values at ij
     REAL(sp)              :: Le, Le1, Le2, Le3, Le4                ! different lapse rate values
@@ -315,7 +316,7 @@ CONTAINS
        QPlume_ij = TFC_ij * GrowthArea_ij * H * Inst%Fire_Eff * 1.0e6_sp
 
        ! Fire has gone out: reset accumulated energy and skip this cell
-       IF ( GrowthArea_ij <= 0.0_sp .AND. CO_ij <= 0.0_sp ) THEN
+       IF ( BurnArea_ij <= 0.0_sp ) THEN
           Inst%Qo(I,J) = 0.0_sp
           CYCLE
        ENDIF
