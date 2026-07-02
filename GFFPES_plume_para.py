@@ -2,31 +2,32 @@
 """
 Simplified CFFEPS processor for the HEMCO thermodynamic plume rise extension.
 
-Reads CFFEPS CSV output and writes NetCDF files containing:
+Reads CFFEPS CSV output and writes NetCDF files containing all variables needed
+for any plume rise run mode in a single set of files:
 
   Always written:
     ECO          : CO emission rate         [kg/m2/s]
     BurnAreaTot  : cumulative burned area   [km2]   (used for mplume column mass)
-    Zplume       : CFFEPS plume height      [m]
+    Zplume       : CFFEPS plume height      [m]     (max across fires in cell)
+    Qo           : accumulated fire energy  [J]     (from CFFEPS CSV; for use_qo mode)
+    Qplume       : per-timestep fire energy [J]     (from CFFEPS CSV; for validation)
+    TFC          : total fuel consumed      [kg/m2] (for calc_qo mode)
+    FireGrowth   : area grown this hour     [km2]   (for calc_qo mode)
 
-  fire_mode == 'use_qo':
-    Qo           : fire energy              [J]     (pre-computed by CFFEPS)
-
-  fire_mode == 'calc_qo':
-    TFC          : total fuel consumed      [kg/m2] (used with FireGrowth to compute Qo)
-    FireGrowth   : area grown this hour     [km2]   (new burning; energy source)
-
-  In calc_qo mode, tfc_agg_mode controls how TFC and FireGrowth are aggregated
-  when multiple fires share a grid cell in the same hour:
+  tfc_agg_mode controls how TFC, FireGrowth, Qo, Qplume are aggregated when
+  multiple fires share a grid cell in the same hour:
 
     'weighted'  : TFC = sum(TFC_i * Growth_i) / sum(Growth_i)  (area-weighted average)
                   FireGrowth = sum(Growth_i)
-                  Plume extension gets H * TFC * FireGrowth * 1e6 * 0.2 = H * sum(TFC_i * Growth_i) * 1e6 * 0.2
+                  Qo = sum(Qo_i),  Qplume = sum(Qplume_i)
+                  Plume extension gets H * TFC * FireGrowth * 1e6 * 0.2
+                                     = H * sum(TFC_i * Growth_i) * 1e6 * 0.2
 
-    'max_fire'  : TFC and FireGrowth taken from the single fire with the largest Growth in the cell.
+    'max_fire'  : TFC, FireGrowth, Qo, Qplume all taken from the single fire
+                  with the largest Growth in the cell.
 
   NOTE: BurnAreaTot uses cumulative Area(t) (the total fire footprint), NOT growth area.
-        This is needed for the column mass mplume
+        This is needed for the column mass mplume in the Anderson algorithm.
 
 Based on inprogress_GFFPES_para.py by Robin Stevens.
 Simplified and extended by J. Landers.
@@ -48,7 +49,7 @@ import tqdm
 # location of CFFEPS csv input files
 filedir = '/data/high_res/CTM/CFFEPS/2019/'
 # location for output nc files
-outdir = '/data/ctm2/HEMCO/CFFEPS/calc_qo/max_fire/'
+outdir = '/data/ctm/HEMCO/CFFEPS/PlumeDataQPlume/'
 
 # NOTE on startdate / enddate:
 # These are the UTC forecast dates you want in the OUTPUT files, not the input file dates.
@@ -74,15 +75,19 @@ lonmax = -52.5
 
 eps = 1e-20  # small number to avoid floating-point exclusion of max boundary
 
-# Fire energy mode:
-#   'calc_qo' — output TFC + FireGrowth; Fortran computes Qo = H * TFC * FireGrowth * 1e6 * 0.2
-#   'use_qo'  — output pre-computed Qo from CFFEPS CSV directly
-fire_mode = 'use_qo'
-
-# TFC aggregation mode (only used when fire_mode == 'calc_qo'):
-#   'weighted' — area-weighted average TFC; correct for multi-fire cells
-#   'max_fire' — TFC and growth from the single largest fire in the cell
-tfc_agg_mode = 'max_fire'
+# Aggregation mode for TFC, FireGrowth, Qo, Qplume:
+#   'weighted' — area-weighted average TFC; sum FireGrowth, Qo, Qplume across all fires
+#   'max_fire' — all four fields taken from the single fire with the largest Growth
+#
+# Use 'weighted' for the calc_qo agg extension. It sets
+#   TFC        = sum(TFC_i * Growth_i) / sum(Growth_i)   (area-weighted mean)
+#   FireGrowth = sum(Growth_i)
+# so the extension's per-hour energy TFC * FireGrowth = sum(TFC_i * Growth_i), i.e. it sums
+# every fire's energy contribution in the cell — consistent with BurnAreaTot and CO, which are
+# already summed across all fires. The actual energy calculation stays in the extension
+# (TFC * FireGrowth * H * Fire_Eff). 'max_fire' keeps only the single largest-growth fire and
+# therefore under-represents energy in multi-fire cells (see qo_reset_condition_bias.md item 11).
+tfc_agg_mode = 'weighted'
 
 # --- INITIALIZE ---
 
@@ -125,18 +130,15 @@ def process_one_day(the_date: dt.datetime):
     area_burned = np.zeros([ntimes, nlats, nlons])  # cumulative burned area [km2] -> BurnAreaTot
     zplume_data = np.zeros([ntimes, nlats, nlons])  # CFFEPS plume height [m]
 
-    # Mode-specific arrays
-    if fire_mode == 'calc_qo':
-        if tfc_agg_mode == 'weighted':
-            tfc_x_growth       = np.zeros([ntimes, nlats, nlons])  # sum(TFC_i * Growth_i) [kg*km2/m2]
-            growth_total       = np.zeros([ntimes, nlats, nlons])  # sum(Growth_i) [km2]
-        elif tfc_agg_mode == 'max_fire':
-            tfc_data           = np.zeros([ntimes, nlats, nlons])  # TFC of biggest fire [kg/m2]
-            garea_burned       = np.zeros([ntimes, nlats, nlons])  # growth of biggest fire [km2]
-            max_growth_tracker = np.zeros([ntimes, nlats, nlons])  # tracking array, not written
-    elif fire_mode == 'use_qo':
-        qo_data                = np.zeros([ntimes, nlats, nlons])  # fire energy [J]
-        qplume_data            = np.zeros([ntimes, nlats, nlons])  # plume energy [J]
+    # All fields always allocated regardless of agg mode
+    qo_data            = np.zeros([ntimes, nlats, nlons])  # accumulated fire energy [J]
+    qplume_data        = np.zeros([ntimes, nlats, nlons])  # per-timestep fire energy [J]
+    tfc_data           = np.zeros([ntimes, nlats, nlons])  # TFC [kg/m2]
+    garea_burned       = np.zeros([ntimes, nlats, nlons])  # FireGrowth [km2]
+    max_growth_tracker = np.zeros([ntimes, nlats, nlons])  # internal tracker, not written
+    if tfc_agg_mode == 'weighted':
+        tfc_x_growth   = np.zeros([ntimes, nlats, nlons])  # sum(TFC_i * Growth_i) [kg*km2/m2]
+        growth_total   = np.zeros([ntimes, nlats, nlons])  # sum(Growth_i) [km2]
 
     # Each CFFEPS file is named one day ahead: the file for (the_date + 1) contains
     # the forecasts generated from fires detected on the_date.
@@ -211,21 +213,22 @@ def process_one_day(the_date: dt.datetime):
                             zplume_data[time_index, lat_ind, lon_ind],
                             float(dataframe[' Zplume'].iloc[i]))
 
-                        if fire_mode == 'calc_qo':
-                            growth_km2 = dataframe[' Growth (t)'].iloc[i] * 0.01  # ha -> km2
-                            tfc_val    = dataframe[' tfc'].iloc[i]                # [kg/m2]
-                            if tfc_agg_mode == 'weighted':
-                                tfc_x_growth[time_index, lat_ind, lon_ind] += tfc_val * growth_km2
-                                growth_total[time_index, lat_ind, lon_ind] += growth_km2
-                            elif tfc_agg_mode == 'max_fire':
-                                if growth_km2 > max_growth_tracker[time_index, lat_ind, lon_ind]:
-                                    max_growth_tracker[time_index, lat_ind, lon_ind] = growth_km2
-                                    tfc_data[time_index, lat_ind, lon_ind]     = tfc_val
-                                    garea_burned[time_index, lat_ind, lon_ind] = growth_km2
-
-                        elif fire_mode == 'use_qo':
-                            qo_data[time_index, lat_ind, lon_ind] += dataframe[' Qo'].iloc[i]
-                            qplume_data[time_index, lat_ind, lon_ind] += dataframe[' Qplume'].iloc[i]
+                        growth_km2 = dataframe[' Growth (t)'].iloc[i] * 0.01  # ha -> km2
+                        tfc_val    = dataframe[' tfc'].iloc[i]                # [kg/m2]
+                        qo_val     = dataframe[' Qo'].iloc[i]                 # [J]
+                        qplume_val = dataframe[' Qplume'].iloc[i]             # [J]
+                        if tfc_agg_mode == 'weighted':
+                            tfc_x_growth[time_index, lat_ind, lon_ind] += tfc_val * growth_km2
+                            growth_total[time_index, lat_ind, lon_ind] += growth_km2
+                            qo_data[time_index, lat_ind, lon_ind]      += qo_val
+                            qplume_data[time_index, lat_ind, lon_ind]  += qplume_val
+                        elif tfc_agg_mode == 'max_fire':
+                            if growth_km2 > max_growth_tracker[time_index, lat_ind, lon_ind]:
+                                max_growth_tracker[time_index, lat_ind, lon_ind] = growth_km2
+                                tfc_data[time_index, lat_ind, lon_ind]    = tfc_val
+                                garea_burned[time_index, lat_ind, lon_ind] = growth_km2
+                                qo_data[time_index, lat_ind, lon_ind]     = qo_val
+                                qplume_data[time_index, lat_ind, lon_ind] = qplume_val
 
                     elif fileformat == '2022':
                         co_data[time_index, lat_ind, lon_ind] += float(row[' ECO '].iloc[0])
@@ -236,40 +239,39 @@ def process_one_day(the_date: dt.datetime):
                         except (ValueError, KeyError) as err:
                             print('area_burned 2022:', err)
 
-                        if fire_mode == 'calc_qo':
-                            # NOTE: tfc and Growth column names in 2022 format not yet verified.
-                            # Assuming same lowercase names as 2021 format; update if needed.
-                            try:
-                                growth_km2 = dataframe[' Growth (t)'].iloc[i] * 0.01
-                                tfc_val    = dataframe[' tfc'].iloc[i]
-                                if tfc_agg_mode == 'weighted':
-                                    tfc_x_growth[time_index, lat_ind, lon_ind] += tfc_val * growth_km2
-                                    growth_total[time_index, lat_ind, lon_ind] += growth_km2
-                                elif tfc_agg_mode == 'max_fire':
-                                    if growth_km2 > max_growth_tracker[time_index, lat_ind, lon_ind]:
-                                        max_growth_tracker[time_index, lat_ind, lon_ind] = growth_km2
-                                        tfc_data[time_index, lat_ind, lon_ind]     = tfc_val
-                                        garea_burned[time_index, lat_ind, lon_ind] = growth_km2
-                            except (ValueError, KeyError) as err:
-                                print('calc_qo 2022:', err)
-
-                        elif fire_mode == 'use_qo':
-                            try:
-                                qo_data[time_index, lat_ind, lon_ind] += dataframe[' Qo'].iloc[i]
-                                qplume_data[time_index, lat_ind, lon_ind] += dataframe[' Qplume'].iloc[i]
-                            except (ValueError, KeyError) as err:
-                                print('qo_data 2022:', err)
+                        # NOTE: tfc, Growth, Qo, Qplume column names in 2022 format not yet verified.
+                        # Assuming same names as 2021 format; update if needed.
+                        try:
+                            growth_km2 = dataframe[' Growth (t)'].iloc[i] * 0.01
+                            tfc_val    = dataframe[' tfc'].iloc[i]
+                            qo_val     = dataframe[' Qo'].iloc[i]
+                            qplume_val = dataframe[' Qplume'].iloc[i]
+                            if tfc_agg_mode == 'weighted':
+                                tfc_x_growth[time_index, lat_ind, lon_ind] += tfc_val * growth_km2
+                                growth_total[time_index, lat_ind, lon_ind] += growth_km2
+                                qo_data[time_index, lat_ind, lon_ind]      += qo_val
+                                qplume_data[time_index, lat_ind, lon_ind]  += qplume_val
+                            elif tfc_agg_mode == 'max_fire':
+                                if growth_km2 > max_growth_tracker[time_index, lat_ind, lon_ind]:
+                                    max_growth_tracker[time_index, lat_ind, lon_ind] = growth_km2
+                                    tfc_data[time_index, lat_ind, lon_ind]    = tfc_val
+                                    garea_burned[time_index, lat_ind, lon_ind] = growth_km2
+                                    qo_data[time_index, lat_ind, lon_ind]     = qo_val
+                                    qplume_data[time_index, lat_ind, lon_ind] = qplume_val
+                        except (ValueError, KeyError) as err:
+                            print('fire fields 2022:', err)
 
                 elif not in_grid:
                     print('location not in grid: lat %.2f lon %.2f' % (thislat, thislon))
 
         # --- Post-loop: compute weighted TFC ---
-        if fire_mode == 'calc_qo' and tfc_agg_mode == 'weighted':
+        if tfc_agg_mode == 'weighted':
             # tfc_data = sum(TFC_i * Growth_i) / sum(Growth_i)  [kg/m2]
             # garea_burned = sum(Growth_i)  [km2]
             # Fortran: Qo = H * tfc_data * garea_burned * 1e6 * 0.2 = H * sum(TFC_i*Growth_i) * 1e6 * 0.2
             tfc_data     = np.where(growth_total > 0, tfc_x_growth / growth_total, 0.0)
             garea_burned = growth_total
+            # Qo and Qplume are already summed in the loop
 
         # --- Unit conversion for CO ---
         # 2021 format: tonnes/hour -> g/s
@@ -346,43 +348,45 @@ def process_one_day(the_date: dt.datetime):
         nc_zplume.long_name     = 'estimated plume injection height'
         nc_zplume.units         = 'm'
 
-        if fire_mode == 'use_qo':
-            nc_qo               = ncfile.createVariable('Qo', 'f4', ('time', 'lat', 'lon'))
-            nc_qo[:]            = qo_data[:]
-            nc_qo.standard_name = 'fire energy'
-            nc_qo.long_name     = 'fire energy'
-            nc_qo.units         = 'J'
+        # Qo — accumulated fire energy from CFFEPS CSV (for use_qo mode runs)
+        nc_qo               = ncfile.createVariable('Qo', 'f4', ('time', 'lat', 'lon'))
+        nc_qo[:]            = qo_data[:]
+        nc_qo.standard_name = 'fire energy'
+        nc_qo.long_name     = ('accumulated fire energy [%s]' % tfc_agg_mode)
+        nc_qo.units         = 'J'
+        nc_qo.tfc_agg_mode  = tfc_agg_mode
 
-            nc_qplume           = ncfile.createVariable('Qplume', 'f4', ('time', 'lat', 'lon'))
-            nc_qplume[:]        = qplume_data[:]
-            nc_qplume.standard_name  = 'plume energy'
-            nc_qplume.long_name = 'plume energy'
-            nc_qplume.units     = 'J'
+        # Qplume — per-timestep fire energy from CFFEPS CSV (for validation)
+        nc_qplume               = ncfile.createVariable('Qplume', 'f4', ('time', 'lat', 'lon'))
+        nc_qplume[:]            = qplume_data[:]
+        nc_qplume.standard_name = 'plume energy'
+        nc_qplume.long_name     = ('per-timestep fire energy [%s]' % tfc_agg_mode)
+        nc_qplume.units         = 'J'
+        nc_qplume.tfc_agg_mode  = tfc_agg_mode
 
+        # TFC — for calc_qo mode runs
+        nc_tfc               = ncfile.createVariable('TFC', 'f4', ('time', 'lat', 'lon'))
+        nc_tfc[:]            = tfc_data[:]
+        nc_tfc.standard_name = 'total fuel consumed per unit area'
+        nc_tfc.long_name     = ('area-weighted mean TFC [weighted]' if tfc_agg_mode == 'weighted'
+                                else 'TFC of largest fire in cell [max_fire]')
+        nc_tfc.units         = 'kg m-2'
+        nc_tfc.tfc_agg_mode  = tfc_agg_mode
 
-        elif fire_mode == 'calc_qo':
-            nc_tfc              = ncfile.createVariable('TFC', 'f4', ('time', 'lat', 'lon'))
-            nc_tfc[:]           = tfc_data[:]
-            nc_tfc.standard_name = 'total fuel consumed per unit area'
-            nc_tfc.long_name    = ('area-weighted mean TFC [weighted]' if tfc_agg_mode == 'weighted'
-                                   else 'TFC of largest fire in cell [max_fire]')
-            nc_tfc.units        = 'kg m-2'
-            nc_tfc.tfc_agg_mode = tfc_agg_mode
-
-            nc_growth               = ncfile.createVariable('FireGrowth', 'f4', ('time', 'lat', 'lon'))
-            nc_growth[:]            = garea_burned[:]
-            nc_growth.standard_name = 'fire area growth'
-            nc_growth.long_name     = ('total area growth this hour [weighted]' if tfc_agg_mode == 'weighted'
-                                       else 'area growth of largest fire in cell [max_fire]')
-            nc_growth.units         = 'km^2'
-            nc_growth.tfc_agg_mode  = tfc_agg_mode
+        # FireGrowth — for calc_qo mode runs
+        nc_growth               = ncfile.createVariable('FireGrowth', 'f4', ('time', 'lat', 'lon'))
+        nc_growth[:]            = garea_burned[:]
+        nc_growth.standard_name = 'fire area growth'
+        nc_growth.long_name     = ('total area growth this hour [weighted]' if tfc_agg_mode == 'weighted'
+                                   else 'area growth of largest fire in cell [max_fire]')
+        nc_growth.units         = 'km^2'
+        nc_growth.tfc_agg_mode  = tfc_agg_mode
 
         # Global attributes
         ncfile.setncattr('title',              'CFFEPS fire inputs for plume rise: ' + datestr)
         ncfile.setncattr('contact',            'Julian Landers')
         ncfile.setncattr('conventions',        'COARDS')
-        ncfile.setncattr('fire_mode',          fire_mode)
-        ncfile.setncattr('tfc_agg_mode',       tfc_agg_mode if fire_mode == 'calc_qo' else 'N/A')
+        ncfile.setncattr('tfc_agg_mode',       tfc_agg_mode)
         ncfile.setncattr('history',            'File generated on: ' + time.ctime(time.time()))
         ncfile.setncattr('productiondatetime', 'File generated on: ' + time.ctime(time.time()))
         ncfile.setncattr('format',             'NETCDF-4')
@@ -396,7 +400,7 @@ if __name__ == "__main__":
     print("Time resolution: " + ["daily", "hourly"][dohourly])
     print("Spatial resolution (degrees): " + str(lat_res) + " x " + str(lon_res))
     print(f"Grid lat[{lats[0]}, {lats[-1]}] lon[{lons[0]}, {lons[-1]}]  (n={len(lats)}x{len(lons)})")
-    print(f"fire_mode={fire_mode}" + (f"  tfc_agg_mode={tfc_agg_mode}" if fire_mode == 'calc_qo' else ""))
+    print(f"tfc_agg_mode={tfc_agg_mode}")
 
     all_days = [startdate + dt.timedelta(days=i)
                 for i in range((enddate - startdate).days + 1)]
