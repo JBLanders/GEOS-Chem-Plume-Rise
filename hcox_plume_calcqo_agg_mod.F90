@@ -289,26 +289,26 @@ CONTAINS
        BurnArea_ij = REAL( Inst%Fire_BurnAreaTot(I,J), sp ) !Total burned area for fire plume [km2]
        CO_ij   = REAL( Inst%Fire_CO(I,J),           sp )  ! CO flux [kg/m2/s]
 
-       FuelMult = 1.0_sp
-       DO JJ  = 1, SIZE(CROP_ID)
-           IF (Inst%LANDTYPE(I,J, CROP_ID(JJ) + 1 ) > 0.0_sp ) THEN
-               FuelMult = 0.01_sp
-               EXIT
-           ENDIF
-       ENDDO
-       DO II = 1, SIZE(GRASS_ID)
-           IF (Inst%LANDTYPE(I,J,GRASS_ID(II) + 1 ) > 0.0_sp ) THEN
-               FuelMult = 0.05_sp
-               EXIT
-           ENDIF
-       ENDDO
-       DO II = 1, SIZE(FOREST_ID)
-           IF ( Inst%LANDTYPE(I,J,FOREST_ID(II) + 1 ) > 0.0_sp ) THEN
-               FuelMult = 2.0_sp
-               EXIT
-           ENDIF
-       ENDDO
-       save_Landtype(I,J) = FuelMult
+       !FuelMult = 1.0_sp
+       !DO JJ  = 1, SIZE(CROP_ID)
+       !    IF (Inst%LANDTYPE(I,J, CROP_ID(JJ) + 1 ) > 0.0_sp ) THEN
+       !        FuelMult = 0.01_sp
+       !        EXIT
+       !    ENDIF
+       !ENDDO
+       !DO II = 1, SIZE(GRASS_ID)
+       !    IF (Inst%LANDTYPE(I,J,GRASS_ID(II) + 1 ) > 0.0_sp ) THEN
+       !        FuelMult = 0.05_sp
+       !        EXIT
+       !    ENDIF
+       !ENDDO
+       !DO II = 1, SIZE(FOREST_ID)
+       !    IF ( Inst%LANDTYPE(I,J,FOREST_ID(II) + 1 ) > 0.0_sp ) THEN
+       !        FuelMult = 2.0_sp
+       !        EXIT
+       !    ENDIF
+       !ENDDO
+       !save_Landtype(I,J) = FuelMult
 
        ! Per-timestep energy from GrowthArea (new area burned this timestep only)
        ! [kg/m2] * [km2] * [J/kg] * [-] * [m2/km2] = [J]
@@ -476,7 +476,7 @@ CONTAINS
     ! Write diagnosed plume top heights to the ZPlume_Calc diagnostic
     CALL Diagn_Update( HcoState, cName='ZPlume', Array2D=ZPlume2D, RC=RC )
     CALL Diagn_Update( HcoState, cName='save_QPlume', Array2D=save_QPlume, RC=RC )
-    CALL Diagn_Update( HcoState, cName='save_Landtype', Array2D=save_Landtype, RC=RC )
+    !CALL Diagn_Update( HcoState, cName='save_Landtype', Array2D=save_Landtype, RC=RC )
     IF (RC /= HCO_SUCCESS ) THEN
        MSG = 'Diagn_Update error: plume rise'
        CALL HCO_ERROR( MSG, RC )
@@ -485,7 +485,8 @@ CONTAINS
 
     ! Cleanup
     DEALLOCATE( Ph, Zh, Rho, EmisCol, Emis3D, ZPlume2D )
-    DEALLOCATE( save_QPlume, save_Landtype )
+    DEALLOCATE( save_QPlume )
+    !DEALLOCATE( save_Landtype )
     Inst => NULL()
 
     CALL HCO_LEAVE( HcoState%Config%Err, RC )
@@ -662,19 +663,19 @@ CONTAINS
        RETURN
     ENDIF
 
-    CALL Diagn_Create( HcoState, &
-                       cName = 'save_Landtype', &
-                       ExtNr = Inst%ExtNr, &
-                       SpaceDim = 2, &
-                       OutUnit = 'm', &
-                       OutOper = 'Mean', &
-                       AutoFill = 0, &
-                       COL = HcoState%Diagn%HcoDiagnIDDefault, &
-                       RC = RC )
-    IF ( RC /= HCO_SUCCESS ) THEN
-       CALL HCO_ERROR( 'Cannot create save_Landtype diagnostic', RC, THISLOC=LOC )
-       RETURN
-    ENDIF
+    !CALL Diagn_Create( HcoState, &
+    !                   cName = 'save_Landtype', &
+    !                   ExtNr = Inst%ExtNr, &
+    !                   SpaceDim = 2, &
+    !                   OutUnit = 'm', &
+    !                   OutOper = 'Mean', &
+    !                   AutoFill = 0, &
+    !                   COL = HcoState%Diagn%HcoDiagnIDDefault, &
+    !                   RC = RC )
+    !IF ( RC /= HCO_SUCCESS ) THEN
+    !   CALL HCO_ERROR( 'Cannot create save_Landtype diagnostic', RC, THISLOC=LOC )
+    !   RETURN
+    !ENDIF
 
     ! Log extension activation
     IF ( HcoState%amIRoot ) THEN
@@ -1124,7 +1125,7 @@ CONTAINS
        IF ( ASSOCIATED(Inst%Fire_GrowthArea)  ) DEALLOCATE(Inst%Fire_GrowthArea)
        IF ( ASSOCIATED(Inst%Fire_BurnAreaTot) ) DEALLOCATE(Inst%Fire_BurnAreaTot)
        IF ( ASSOCIATED(Inst%Fire_TFC)         ) DEALLOCATE(Inst%Fire_TFC)
-       IF ( ASSOCIATED(Inst%LANDTYPE)         ) DEALLOCATE(Inst%LANDTYPE)
+       !IF ( ASSOCIATED(Inst%LANDTYPE)         ) DEALLOCATE(Inst%LANDTYPE)
        ! Pop instance off the linked list
        IF ( ASSOCIATED(PrevInst) ) THEN
           PrevInst%NextInst => Inst%NextInst
