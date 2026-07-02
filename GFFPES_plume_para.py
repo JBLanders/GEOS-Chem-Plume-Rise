@@ -269,7 +269,10 @@ def process_one_day(the_date: dt.datetime):
             # tfc_data = sum(TFC_i * Growth_i) / sum(Growth_i)  [kg/m2]
             # garea_burned = sum(Growth_i)  [km2]
             # Fortran: Qo = H * tfc_data * garea_burned * 1e6 * 0.2 = H * sum(TFC_i*Growth_i) * 1e6 * 0.2
-            tfc_data     = np.where(growth_total > 0, tfc_x_growth / growth_total, 0.0)
+            # np.divide with where= avoids evaluating the division at growth_total<=0
+            # cells (np.where would compute it everywhere first -> spurious divide warning).
+            tfc_data     = np.divide(tfc_x_growth, growth_total,
+                                     out=np.zeros_like(tfc_x_growth), where=growth_total > 0)
             garea_burned = growth_total
             # Qo and Qplume are already summed in the loop
 
