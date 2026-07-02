@@ -176,6 +176,8 @@ CONTAINS
     REAL(sp), ALLOCATABLE :: Emis3D(:,:,:)                         ! 3D CO emissions [kg/m2/s]
     REAL(sp), ALLOCATABLE :: ZPlume2D(:,:)                         ! save plume top height [m]
     REAL(sp), ALLOCATABLE :: save_QPlume(:,:)                      !diagn
+    REAL(sp), ALLOCATABLE :: save_QPlume_inst(:,:)                 !diagn: per-timestep energy before accumulation
+    REAL(sp), ALLOCATABLE :: save_BurnAreaTot(:,:)                 !diagn: BurnAreaTot read each timestep
     !REAL(sp), ALLOCATABLE :: save_Landtype(:,:)
     !=================================================================
     ! HCOX_Plume_Run begins here!
@@ -272,9 +274,13 @@ CONTAINS
     ! Allocate arrays some arrays
     ALLOCATE( Ph(NZ), Zh(NZ), Rho(NZ), EmisCol(NZ), Emis3D(NX,NY,NZ), ZPlume2D(NX,NY) )
     ALLOCATE( save_QPlume(NX,NY) )
+    ALLOCATE( save_QPlume_inst(NX,NY) )
+    ALLOCATE( save_BurnAreaTot(NX,NY) )
     !ALLOCATE( save_Landtype(NX,NY) )
-    Emis3D   = 0.0_sp
-    ZPlume2D = 0.0_sp
+    Emis3D         = 0.0_sp
+    ZPlume2D       = 0.0_sp
+    save_QPlume_inst = 0.0_sp
+    save_BurnAreaTot = 0.0_sp
 
     !=================================================================
     ! Start looping through boxes.
@@ -324,7 +330,9 @@ CONTAINS
        ! Accumulate energy: Qt is total energy driving the plume this timestep.
        ! Matches CFFEPS C code: Qt = Qplume_current + Qo_prior
        Qt = QPlume_ij + Inst%Qo(I,J)
-       save_QPlume(I,J) = Qt
+       save_QPlume(I,J)      = Qt
+       save_QPlume_inst(I,J) = QPlume_ij
+       save_BurnAreaTot(I,J) = BurnArea_ij
 
        IF ( Qt <= 0.0_sp .OR. CO_ij <= 0.0_sp .OR. BurnArea_ij <= 0.0_sp ) CYCLE
 
@@ -476,7 +484,9 @@ CONTAINS
 
     ! Write diagnosed plume top heights to the ZPlume_Calc diagnostic
     CALL Diagn_Update( HcoState, cName='ZPlume', Array2D=ZPlume2D, RC=RC )
-    CALL Diagn_Update( HcoState, cName='save_QPlume', Array2D=save_QPlume, RC=RC )
+    CALL Diagn_Update( HcoState, cName='save_QPlume',      Array2D=save_QPlume,      RC=RC )
+    CALL Diagn_Update( HcoState, cName='save_QPlume_inst', Array2D=save_QPlume_inst, RC=RC )
+    CALL Diagn_Update( HcoState, cName='save_BurnAreaTot', Array2D=save_BurnAreaTot, RC=RC )
     !CALL Diagn_Update( HcoState, cName='save_Landtype', Array2D=save_Landtype, RC=RC )
     IF (RC /= HCO_SUCCESS ) THEN
        MSG = 'Diagn_Update error: plume rise'
@@ -486,7 +496,7 @@ CONTAINS
 
     ! Cleanup
     DEALLOCATE( Ph, Zh, Rho, EmisCol, Emis3D, ZPlume2D )
-    DEALLOCATE( save_QPlume )
+    DEALLOCATE( save_QPlume, save_QPlume_inst, save_BurnAreaTot )
     !DEALLOCATE( save_Landtype )
     Inst => NULL()
 
@@ -661,6 +671,34 @@ CONTAINS
                        RC = RC )
     IF ( RC /= HCO_SUCCESS ) THEN
        CALL HCO_ERROR( 'Cannot create save_QPlume diagnostic', RC, THISLOC=LOC )
+       RETURN
+    ENDIF
+
+    CALL Diagn_Create( HcoState, &
+                       cName = 'save_QPlume_inst', &
+                       ExtNr = Inst%ExtNr, &
+                       SpaceDim = 2, &
+                       OutUnit = 'J', &
+                       OutOper = 'Mean', &
+                       AutoFill = 0, &
+                       COL = HcoState%Diagn%HcoDiagnIDDefault, &
+                       RC = RC )
+    IF ( RC /= HCO_SUCCESS ) THEN
+       CALL HCO_ERROR( 'Cannot create save_QPlume_inst diagnostic', RC, THISLOC=LOC )
+       RETURN
+    ENDIF
+
+    CALL Diagn_Create( HcoState, &
+                       cName = 'save_BurnAreaTot', &
+                       ExtNr = Inst%ExtNr, &
+                       SpaceDim = 2, &
+                       OutUnit = 'km2', &
+                       OutOper = 'Mean', &
+                       AutoFill = 0, &
+                       COL = HcoState%Diagn%HcoDiagnIDDefault, &
+                       RC = RC )
+    IF ( RC /= HCO_SUCCESS ) THEN
+       CALL HCO_ERROR( 'Cannot create save_BurnAreaTot diagnostic', RC, THISLOC=LOC )
        RETURN
     ENDIF
 
