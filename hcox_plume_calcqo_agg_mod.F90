@@ -158,7 +158,7 @@ CONTAINS
     CHARACTER(LEN=255)    :: MSG, LOC                              ! hemco things
     !CHARACTER(LEN=12)     :: LandName                              ! CHAR to read Landtypes
     !INTEGER               :: T                                     ! INT to read Landtypes
-    INTEGER               :: I, J, L, N,                           ! loop variables
+    INTEGER               :: I, J, L, N                           ! loop variables
     !INTEGER               :: JJ
     INTEGER               :: NX, NY, NZ                            ! number of grid cells
     INTEGER               :: ref1, ref2, ref3, ref4, ref5          ! Levels correspoinding to lapse rates
@@ -322,7 +322,7 @@ CONTAINS
        QPlume_ij = TFC_ij * GrowthArea_ij * H * Inst%Fire_Eff * 1.0e6_sp
 
        ! Fire has gone out: reset accumulated energy and skip this cell
-       IF ( BurnArea_ij <= 0.0_sp ) THEN
+       IF ( ( GrowthArea_ij <= 0.0_sp .AND. CO_ij <= 0.0_sp) .OR.  BurnArea_ij <= 0.0_sp ) THEN
           Inst%Qo(I,J) = 0.0_sp
           CYCLE
        ENDIF
@@ -432,6 +432,8 @@ CONTAINS
           ELSE
              dz  = dz + ddz
           ENDIF
+
+          IF ( dz > REAL(IMAX_CF, sp) ) dz = REAL(IMAX_CF, sp )
 
           ! Select lapse rate segment appropriate for current dz
           IF      ( dz > 2000.0_sp .AND. dz <= 4000.0_sp ) THEN
