@@ -329,7 +329,7 @@ CONTAINS
 
        ! Per-timestep energy from GrowthArea (new area burned this timestep only)
        ! [kg/m2] * [km2] * [J/kg] * [-] * [m2/km2] = [J]
-       QPlume_ij = TFC_ij * GrowthArea_ij * H * Inst%Fire_Eff * 1.0e6_sp
+       QPlume_ij = TFC_ij * GrowthArea_ij * 2.0_sp * H * Inst%Fire_Eff * 1.0e6_sp
 
        ! Fire has gone out: reset accumulated energy and skip this cell
        IF ( ( GrowthArea_ij <= 0.0_sp .AND. CO_ij <= 0.0_sp) .OR.  BurnArea_ij <= 0.0_sp ) THEN
