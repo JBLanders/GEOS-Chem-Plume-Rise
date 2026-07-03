@@ -339,7 +339,7 @@ CONTAINS
 
        ! Accumulate energy: Qt is total energy driving the plume this timestep.
        ! Matches CFFEPS C code: Qt = Qplume_current + Qo_prior
-       Qt = QPlume_ij + Inst%Qo(I,J)
+       Qt = QPlume_ij * ( HcoState%TS_EMIS / 3600_sp ) + Inst%Qo(I,J)
        save_Qt(I,J)          = Qt
        save_QPlume(I,J)      = QPlume_ij
        save_BurnAreaTot(I,J) = BurnArea_ij
