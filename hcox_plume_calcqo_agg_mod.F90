@@ -161,16 +161,16 @@ CONTAINS
     INTEGER               :: I, J, L, N                           ! loop variables
     !INTEGER               :: JJ
     INTEGER               :: NX, NY, NZ                            ! number of grid cells
-    INTEGER               :: ref1, ref2, ref3, ref4, ref5          ! Levels correspoinding to lapse rates
     INTEGER               :: ii                                    ! plume height top and N layers
     !REAL(sp)              :: FuelMult                              ! store values of land type coverage
     REAL(sp)              :: QPlume_ij, Qt, BurnArea_ij, CO_ij    ! fire values at ij
     REAL(sp)              :: GrowthArea_ij, TFC_ij                 ! fire values at ij
-    REAL(sp)              :: Le, Le1, Le2, Le3, Le4                ! different lapse rate values
+    REAL(sp)              :: Le                                    ! lapse rate used in bisection [K/m]
     REAL(sp)              :: tsurf, ps, area                       ! met/area at each fire
     REAL(sp)              :: dz, ddz, q, Qatm, mplume, work        ! compute variables
     REAL(sp), ALLOCATABLE :: Ph(:)                                 ! pressure profile [hPa]
     REAL(sp), ALLOCATABLE :: Zh(:)                                 ! altitude profile [m]
+    REAL(sp), ALLOCATABLE :: Le_prof(:)                            ! surface->level mean lapse rate [K/m]
     REAL(sp), ALLOCATABLE :: Rho(:)                                ! air density profile [kg/m3]
     REAL(sp), ALLOCATABLE :: EmisCol(:)                            ! Single column of emissions
     REAL(sp), ALLOCATABLE :: Emis3D(:,:,:)                         ! 3D CO emissions [kg/m2/s]
@@ -275,7 +275,7 @@ CONTAINS
 
 
     ! Allocate arrays some arrays
-    ALLOCATE( Ph(NZ), Zh(NZ), Rho(NZ), EmisCol(NZ), Emis3D(NX,NY,NZ), ZPlume2D(NX,NY) )
+    ALLOCATE( Ph(NZ), Zh(NZ), Le_prof(NZ), Rho(NZ), EmisCol(NZ), Emis3D(NX,NY,NZ), ZPlume2D(NX,NY) )
     ALLOCATE( save_Qt(NX,NY) )
     ALLOCATE( save_QPlume(NX,NY) )
     ALLOCATE( save_BurnAreaTot(NX,NY) )
@@ -362,45 +362,25 @@ CONTAINS
           Zh(L) = Zh(L-1) + REAL(HcoState%Grid%BXHEIGHT_M%Val(I,J,L-1), sp)
        ENDDO
 
-       ! Find the vertical layer for 800, 700, 500 and 200 hPa to calculate lapse rates later
-       ref1 = 1   ! surface Should delete ref1  and/or switch ref2->ref1, ref3->ref2 etc.
-       ref2 = NZ  ! defaults in case threshold not found in column
-       ref3 = NZ
-       ref4 = NZ
-       ref5 = NZ
-
+       ! Continuous environmental lapse-rate profile (replaces the four fixed
+       ! pressure-level brackets Le1..Le4). For every model level L we compute the
+       ! MEAN lapse rate from the surface (T2M) up to the midpoint of box L:
+       !   Le_prof(L) = ( TK(L) - T2M ) / Zmid(L)
+       ! where Zmid(L) = Zh(L) + 0.5*BXHEIGHT(L) is the box-midpoint altitude.
+       ! Both the lapse rate AND its selection now live in altitude space, so the
+       ! bisection lapse rate varies smoothly with dz instead of stepping across
+       ! four segments (the old 2000/4000/7000 m switches produced injection-height
+       ! pile-ups). The four old values are just Le_prof at ref2/ref3/ref4/ref5.
+       Le_prof(1) = 0.0_sp   ! reset (index 1 set below to avoid Le=0 fallback)
        DO L = 2, NZ
-          IF ( Ph(L) <= 85000.0_sp ) THEN; ref2 = L; EXIT; ENDIF
+          Le_prof(L) = ( REAL(ExtState%TK%Arr%Val(I,J,L), sp)                       &
+                       - REAL(ExtState%T2M%Arr%Val(I,J), sp) )                      &
+                     / ( Zh(L) + 0.5_sp*REAL(HcoState%Grid%BXHEIGHT_M%Val(I,J,L), sp) )
        ENDDO
-       DO L = 3, NZ
-          IF ( Ph(L) <= 70000.0_sp ) THEN; ref3 = L; EXIT; ENDIF
-       ENDDO
-       DO L = 4, NZ
-          IF ( Ph(L) <= 50000.0_sp ) THEN; ref4 = L; EXIT; ENDIF
-       ENDDO
-       DO L = 5, NZ
-          IF ( Ph(L) <= 20000.0_sp ) THEN; ref5 = L; EXIT; ENDIF
-       ENDDO
-
-       ! Environmental lapse rates at reference levels
-       ! Le = (T_upper - T_surface) / (Z_upper - Z_surface)
-       ! Zh is the altitude at the bottom of the box. I assume TK is the
-       ! midpoint temperature, so we add 0.5 of box height of refX to find the
-       ! altitude at the midpoint (technically T2M is the temp at 2m but who
-       ! cares
-       Le1 = 0.0_sp; Le2 = 0.0_sp; Le3 = 0.0_sp; Le4 = 0.0_sp
-       Le1 = ( REAL(ExtState%TK%Arr%Val(I,J,ref2), sp)           &
-             - REAL(ExtState%T2M%Arr%Val(I,J), sp) )          &
-           / ( Zh(ref2) + 0.5_sp*REAL(HcoState%Grid%BXHEIGHT_M%Val(I,J,ref2), sp) )   ! surface to 850 hPa
-       Le2 = ( REAL(ExtState%TK%Arr%Val(I,J,ref3), sp)           &
-             - REAL(ExtState%T2M%Arr%Val(I,J), sp) )          &
-           / ( Zh(ref3) + 0.5*REAL(HcoState%Grid%BXHEIGHT_M%Val(I,J,ref3), sp ) )   ! surface to 700 hPa
-       Le3 = ( REAL(ExtState%TK%Arr%Val(I,J,ref4), sp)           &
-             - REAL(ExtState%T2M%Arr%Val(I,J), sp) )          &
-           / ( Zh(ref4) + 0.5*REAL(HcoState%Grid%BXHEIGHT_M%Val(I,J,ref4), sp) )
-       Le4 = ( REAL(ExtState%TK%Arr%Val(I,J,ref5), sp)           &
-             - REAL(ExtState%T2M%Arr%Val(I,J), sp) )          &
-           / ( Zh(ref5) + 0.5*REAL(HcoState%Grid%BXHEIGHT_M%Val(I,J,ref5), sp) )   ! surface to 200 hPa
+       ! If dz falls inside layer 1 the lapse rate is undefined at index 1;
+       ! use the layer-1->2 gradient so a spurious Le=0 isothermal fallback
+       ! is never triggered there.
+       Le_prof(1) = Le_prof(2)
 
 
        ! Preamble calculations done, now start the Anderson algorithm
@@ -412,7 +392,7 @@ CONTAINS
 
        dz     = 1000.0_sp   ! initial height guess [m]
        ddz    = 1000.0_sp   ! bisection step [m]
-       Le     = Le1         ! Start at lowest lapse rate
+       Le     = Le_prof(2)  ! seed; refined from Le_prof(dz) each iteration
        ii     = 0
        mplume = 0.0_sp
 
@@ -447,15 +427,23 @@ CONTAINS
 
           IF ( dz > REAL(IMAX_CF, sp) ) dz = REAL(IMAX_CF, sp )
 
-          ! Select lapse rate segment appropriate for current dz
-          IF      ( dz > 2000.0_sp .AND. dz <= 4000.0_sp ) THEN
-             Le = Le2
-          ELSE IF ( dz > 4000.0_sp .AND. dz <= 7000.0_sp ) THEN
-             Le = Le3
-          ELSE IF ( dz > 7000.0_sp ) THEN
-             Le = Le4
+          ! Continuous lapse rate at altitude dz: linearly interpolate the
+          ! surface->level mean lapse-rate profile Le_prof between the two model
+          ! levels bracketing dz. This makes Le (and hence Qatm) vary smoothly
+          ! with dz, eliminating the injection-height pile-ups the old fixed
+          ! 2000/4000/7000 m brackets produced at their segment boundaries.
+          IF ( dz <= Zh(2) ) THEN
+             Le = Le_prof(2)
+          ELSE IF ( dz >= Zh(NZ) ) THEN
+             Le = Le_prof(NZ)
           ELSE
-             Le = Le1
+             DO L = 2, NZ-1
+                IF ( dz < Zh(L+1) ) THEN
+                   Le = Le_prof(L) + ( Le_prof(L+1) - Le_prof(L) )        &
+                                   * ( dz - Zh(L) ) / ( Zh(L+1) - Zh(L) )
+                   EXIT
+                ENDIF
+             ENDDO
           ENDIF
 
           ii = ii + 1
@@ -516,7 +504,7 @@ CONTAINS
     ENDIF
 
     ! Cleanup
-    DEALLOCATE( Ph, Zh, Rho, EmisCol, Emis3D, ZPlume2D )
+    DEALLOCATE( Ph, Zh, Le_prof, Rho, EmisCol, Emis3D, ZPlume2D )
     DEALLOCATE( save_Qt, save_QPlume, save_BurnAreaTot, save_TFC, save_GrowthArea, save_Qatm )
     !DEALLOCATE( save_Landtype )
     Inst => NULL()
