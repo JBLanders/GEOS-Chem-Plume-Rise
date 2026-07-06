@@ -49,7 +49,7 @@ import tqdm
 # location of CFFEPS csv input files
 filedir = '/data/high_res/CTM/CFFEPS/2019/'
 # location for output nc files
-outdir = '/data/ctm/HEMCO/CFFEPS/PlumeDataQPlume/'
+outdir = '/Users/julianlanders/OneDrive - University of Toronto/Research Stuff/CFFEPS/OutDir/Claude/'
 
 # NOTE on startdate / enddate:
 # These are the UTC forecast dates you want in the OUTPUT files, not the input file dates.
@@ -57,8 +57,8 @@ outdir = '/data/ctm/HEMCO/CFFEPS/PlumeDataQPlume/'
 # are named by the day the fire reports were processed (one day after the fire activity).
 # Example: to produce output for April 23-29, set startdate=Apr 23 and enddate=Apr 29.
 #          The script will read input files Apr 24 through Apr 30.
-startdate = dt.datetime(2019, 1, 1)  # First UTC forecast date to produce output for
-enddate   = dt.datetime(2019, 12, 31)  # Last  UTC forecast date to produce output for (inclusive)
+startdate = dt.datetime(2019, 4, 25)  # First UTC forecast date to produce output for
+enddate   = dt.datetime(2019, 4, 27)  # Last  UTC forecast date to produce output for (inclusive)
 
 dohourly = True  # Should we do hourly output or daily means?
                  # NOTE: hourly mode (True) is required for the plume rise extension,
@@ -269,10 +269,7 @@ def process_one_day(the_date: dt.datetime):
             # tfc_data = sum(TFC_i * Growth_i) / sum(Growth_i)  [kg/m2]
             # garea_burned = sum(Growth_i)  [km2]
             # Fortran: Qo = H * tfc_data * garea_burned * 1e6 * 0.2 = H * sum(TFC_i*Growth_i) * 1e6 * 0.2
-            # np.divide with where= avoids evaluating the division at growth_total<=0
-            # cells (np.where would compute it everywhere first -> spurious divide warning).
-            tfc_data     = np.divide(tfc_x_growth, growth_total,
-                                     out=np.zeros_like(tfc_x_growth), where=growth_total > 0)
+            tfc_data     = np.where(growth_total > 0, tfc_x_growth / growth_total, 0.0)
             garea_burned = growth_total
             # Qo and Qplume are already summed in the loop
 
