@@ -54,6 +54,7 @@ MODULE HCOX_Plume_Mod
   PRIVATE :: DistributeEmissionsDensity
   PRIVATE :: DistributeEmissionsUniform
   PRIVATE :: DistributeEmissionsGaussian
+  PRIVATE :: DistributeEmissionsMami
 !
 ! !REVISION HISTORY:
 !  10 Feb 2016 - C. Keller   - Initial version
@@ -470,6 +471,8 @@ CONTAINS
            CALL DistributeEmissionsDensity( dz, Zh, Rho, CO_ij, EmisCol )
        ELSE IF (Inst%DistMethod == 3 ) THEN
            CALL DistributeEmissionsGaussian(dz, Zh, CO_ij, EmisCol )
+       ELSE IF (Inst%DistMethod == 4 ) THEN
+           CALL DistributeEmissionsMami(dz, Zh, CO_ij, EmisCol )
        ENDIF
 
        Emis3D(I,J,:) = EmisCol
@@ -639,6 +642,8 @@ CONTAINS
             Inst%DistMethod = 2
         ELSE IF ( TRIM(DistMethodStr) == 'Gaussian' ) THEN
             Inst%DistMethod = 3
+        ELSE IF ( TRIM(DistMethodStr) == 'Mami' ) THEN
+            Inst%DistMethod = 4
         ELSE
            CALL HCO_ERROR('Unknown Distribution_Method: '//TRIM(DistMethodStr), RC )
            RETURN
@@ -1058,6 +1063,100 @@ CONTAINS
     DEALLOCATE( Weight )
 
  END SUBROUTINE DistributeEmissionsGaussian
+!EOC
+!------------------------------------------------------------------------------
+!                   Harmonized Emissions Component (HEMCO)                    !
+!------------------------------------------------------------------------------
+!BOP
+!
+! !ROUTINE: DistributeEmissionsMami
+!
+! !DESCRIPTION: Calculates the vertical column of CO emissions using a Gaussian
+! centred on the GFAS-style "mean altitude of maximum injection" (MAMI), which
+! empirically sits at MAMI_FRAC (~70%) of the plume-top height (see GFAS apt/mami
+! analysis, 2019: mami ~= 0.70*apt). The Gaussian is placed so that its upper
+! 3-sigma level coincides with the plume top (dz) and, by symmetry, its lower
+! 3-sigma level is mirrored the same distance below the centre:
+!   mu    = MAMI_FRAC * dz
+!   sigma = ( dz - mu ) / 3       (so mu + 3*sigma = dz, mu - 3*sigma = 2*mu - dz)
+! Weights are normalised over the column so total CO is conserved.
+!\\
+!\\
+! !INTERFACE:
+!
+  SUBROUTINE DistributeEmissionsMami( dz, Zh, CO_ij, EmisCol )
+!
+! !USES:
+!
+!
+! !INPUT PARAMETERS:
+!
+    REAL(sp),                   INTENT(IN)          :: dz, CO_ij
+    REAL(sp),                   INTENT(IN)          :: Zh(:)
+!
+! !INPUT/OUTPUT PARAMETERS:
+!
+!
+! !OUTPUT PARAMETERS:
+!
+    REAL(sp),                   INTENT(OUT)         :: EmisCol(:)
+!
+! !REVISION HISTORY:
+!  13 Jul 2026 - J. Landers    - Initial Version
+!  See https://github.com/JBLanders/GEOS-Chem-Plume-Rise for version history
+!EOP
+!------------------------------------------------------------------------------
+!BOC
+!
+! !LOCAL VARIABLES:!
+!
+    ! MAMI as a fraction of plume top [-]; empirical GFAS value (mami ~= 0.70*apt)
+    REAL(sp), PARAMETER      :: MAMI_FRAC = 0.70_sp
+    INTEGER                  :: L, NZ, zplm_topL
+    REAL(sp)                 :: mu, sigma
+    REAL(sp)                 :: weight_f_sum
+    REAL(sp), ALLOCATABLE    :: Weight(:)
+
+    !========================================================================
+    ! DistributeEmissionsMami begins here!
+    !========================================================================
+    NZ = SIZE(Zh)
+    ALLOCATE (Weight(NZ) )
+
+    EmisCol      = 0.0_sp
+    Weight       = 0.0_sp
+    weight_f_sum = 0.0_sp
+    zplm_topL = 1     ! default: surface only
+
+    ! Find level corresponding to plume top
+    DO L = 1, NZ
+       IF ( Zh(L) <= dz ) THEN
+          zplm_topL = L
+       ELSE
+          EXIT
+       ENDIF
+    ENDDO
+
+    ! Gaussian parameters: centre at MAMI, upper 3-sigma at the plume top
+    mu    = MAMI_FRAC * dz
+    sigma = ( dz - mu ) / 3.0_sp
+
+    ! Guard against small dz causing divide by 0 error
+    IF (sigma <= 0.0_sp) sigma = 1.0_sp
+
+    DO L = 1, zplm_topL
+        Weight(L) = EXP( -0.5_sp * ( (Zh(L) - mu) / sigma ) **2 )
+    ENDDO
+
+    weight_f_sum = SUM( Weight(1:zplm_topL) )
+
+    DO L = 1, zplm_topL
+        EmisCol(L) = CO_ij * Weight(L) / weight_f_sum
+    ENDDO
+
+    DEALLOCATE( Weight )
+
+ END SUBROUTINE DistributeEmissionsMami
 !EOC
 !------------------------------------------------------------------------------
 !                   Harmonized Emissions Component (HEMCO)                    !
